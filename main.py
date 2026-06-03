@@ -16,8 +16,12 @@ from stage.extract.vendas_extractor import VendasExtractor
 from stage.extract.contas_pagas_extractor import ContasPagasExtractor
 from stage.transform.vendas_transformer import VendasTransformer
 from stage.transform.contas_pagas_transformer import ContasPagasTransformer
+from stage.transform.contas_pagas_transformer_2 import executar
 
 logger = logging.getLogger(__name__)
+
+
+output_path = Path(r"C:\Users\kaua.rodrigo\PycharmProjects\etl_api_sienge\stage\transform\files\input")
 
 
 # ------------------------------------------------------------------
@@ -85,21 +89,25 @@ class ContasPagasDriver:
         self._extractor = extractor or ContasPagasExtractor()
         self._transformer = transformer or ContasPagasTransformer()
 
-    def run(self) -> pd.DataFrame:
+    def run(self):
         logger.info("=== Pipeline de Contas Pagas iniciado ===")
 
-        logger.info("[1/2] Iniciando extração...")
+        logger.info("[1/3] Iniciando extração...")
         result = self._extractor.extract()  # ContasPagasExtractionResult (único)
 
-        logger.info("[2/2] Iniciando transformação...")
+        logger.info("[2/3] Iniciando primeira transformação...")
         df = self._transformer.transform(result)
-        print(df.columns)
+
         if df.empty:
             logger.error("Pipeline finalizado sem dados.")
-            return df
+        else:
+            df.to_csv(output_path / "contas_pagas.csv", sep=";", index=False)
+            logger.info("Contas pagas salvas em: %s", output_path / "contas_pagas.csv")
+
+        logger.info("[3/3] Iniciando última transformação...")
+        executar()
 
         logger.info("=== Pipeline de Contas Pagas concluído: %d registros ===", len(df))
-        return df
 
 
 # ------------------------------------------------------------------
@@ -110,23 +118,5 @@ if __name__ == "__main__":
 
     setup_logging()
 
-    output_path = Path(r"D:\GitHub\etl_api_sienge\stage\transform\files\input")
-
-    # --- Vendas ---
-    # df_vendas = VendasDriver().run()
-    # if df_vendas.empty:
-    #     logger.error("Nenhum dado de vendas para exportar.")
-    # else:
-    #     df_vendas.to_csv(output_path / "validacao_vendas.csv", sep=";", index=False)
-    #     logger.info("Vendas salvas em: %s", output_path / "validacao_vendas.csv")
-
     # --- Contas Pagas ---
-    df_contas = ContasPagasDriver().run()
-    if df_contas.empty:
-        logger.error("Nenhum dado de contas pagas para exportar.")
-    else:
-        df_contas.to_csv(output_path / "contas_pagas.csv", sep=";", index=False)
-        logger.info("Contas pagas salvas em: %s", output_path / "validacao_contas_pagas.csv")
-
-    # if df_vendas.empty and df_contas.empty:
-    #     sys.exit(1)
+    ContasPagasDriver().run()

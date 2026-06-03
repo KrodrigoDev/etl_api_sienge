@@ -11,74 +11,74 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 MAPPING_COLUMNS = {
     # --- Empresa / estrutura ---
-    "outcome_companyId":                  "Cód. empresa",
-    "outcome_companyName":                "Empresa",
-    "outcome_groupCompanyId":             "Cód. grupo empresa",
-    "outcome_groupCompanyName":           "Grupo empresa",
-    "outcome_holdingId":                  "Cód. holding",
-    "outcome_holdingName":                "Holding",
-    "outcome_subsidiaryId":               "Cód. subsidiária",
-    "outcome_subsidiaryName":             "Subsidiária",
-    "outcome_businessAreaId":             "Cód. área negócio",
-    "outcome_businessAreaName":           "Área negócio",
-    "outcome_businessTypeId":             "Cód. tipo negócio",
-    "outcome_businessTypeName":           "Tipo negócio",
+    "outcome_companyId": "Cód. empresa",
+    "outcome_companyName": "Empresa",
+    "outcome_groupCompanyId": "Cód. grupo empresa",
+    "outcome_groupCompanyName": "Grupo empresa",
+    "outcome_holdingId": "Cód. holding",
+    "outcome_holdingName": "Holding",
+    "outcome_subsidiaryId": "Cód. subsidiária",
+    "outcome_subsidiaryName": "Subsidiária",
+    "outcome_businessAreaId": "Cód. área negócio",
+    "outcome_businessAreaName": "Área negócio",
+    "outcome_businessTypeId": "Cód. tipo negócio",
+    "outcome_businessTypeName": "Tipo negócio",
 
     # --- Credor ---
-    "outcome_creditorId":                 "Cód. credor",
-    "outcome_creditorName":               "Credor",
+    "outcome_creditorId": "Cód. credor",
+    "outcome_creditorName": "Credor",
 
     # --- Título / Parcela ---
-    "outcome_billId":                     "Título",
-    "outcome_installmentId":              "Parcela",
+    "outcome_billId": "Título",
+    "outcome_installmentId": "Parcela",
 
     # --- Documento ---
-    "outcome_documentIdentificationId":   "Sigla documento",
+    "outcome_documentIdentificationId": "Sigla documento",
     "outcome_documentIdentificationName": "Documento",
-    "outcome_documentNumber":             "N° documento",
-    "outcome_forecastDocument":           "Documento previsão",
+    "outcome_documentNumber": "N° documento",
+    "outcome_forecastDocument": "Documento previsão",
 
     # --- Origem / status ---
-    "outcome_originId":                   "Origem",
-    "outcome_consistencyStatus":          "Status consistência",
-    "outcome_authorizationStatus":        "Parcela autorizada",
+    "outcome_originId": "Origem",
+    "outcome_consistencyStatus": "Status consistência",
+    "outcome_authorizationStatus": "Parcela autorizada",
 
     # --- Valores base ---
-    "outcome_originalAmount":             "Valor bruto",
-    "outcome_discountAmount":             "Desconto",
-    "outcome_taxAmount":                  "Acréscimo",
-    "outcome_balanceAmount":              "Saldo em aberto",
-    "outcome_correctedBalanceAmount":     "Saldo corrigido em aberto",
+    "outcome_originalAmount": "Valor bruto",
+    "outcome_discountAmount": "Desconto",
+    "outcome_taxAmount": "Acréscimo",
+    "outcome_balanceAmount": "Saldo em aberto",
+    "outcome_correctedBalanceAmount": "Saldo corrigido em aberto",
 
     # --- Datas base ---
-    "outcome_dueDate":                    "Data vencimento",
-    "outcome_issueDate":                  "Data emissão",
-    "outcome_installmentBaseDate":        "Data base",
-    "outcome_billDate":                   "Data contábil",
+    "outcome_dueDate": "Data vencimento",
+    "outcome_issueDate": "Data emissão",
+    "outcome_installmentBaseDate": "Data base",
+    "outcome_billDate": "Data contábil",
 
     # --- Auditoria ---
-    "outcome_registeredUserId":           "Cód. usuário que cadastrou",
-    "outcome_registeredBy":               "Usuário que cadastrou",
-    "outcome_registeredDate":             "Data de cadastro",
+    "outcome_registeredUserId": "Cód. usuário que cadastrou",
+    "outcome_registeredBy": "Usuário que cadastrou",
+    "outcome_registeredDate": "Data de cadastro",
 
     # --- Obra / projeto ---
-    "outcome_projectId":                  "Cód. obra",
-    "outcome_projectName":                "Obra",
+    "outcome_projectId": "Cód. obra",
+    "outcome_projectName": "Obra",
 
     # --- Payments (expandidos de outcome_payments[0]) ---
-    "payments_grossAmount":               "Valor no vencimento",
-    "payments_taxAmount":                 "Valor Imposto Retido",
-    "payments_netAmount":                 "Valor líquido",
-    "payments_correctedNetAmount":        "Valor da baixa",
-    "payments_paymentDate":               "Data do pagamento",
-    "payments_calculationDate":           "Data do cálculo",
-    "payments_operationTypeName":         "Tipo de operação",
-    "payments_paymentAuthentication":     "Autenticação eletrônica",
+    "payments_grossAmount": "Valor no vencimento", # pegou
+    "payments_taxAmount": "Valor Imposto Retido", # pegou
+    "payments_netAmount": "Valor líquido", # pegou
+    "payments_correctedNetAmount": "Valor da baixa", # pegou
+    "payments_paymentDate": "Data do pagamento",
+    "payments_calculationDate": "Data do cálculo",
+    "payments_operationTypeName": "Tipo de operação",
+    "payments_paymentAuthentication": "Autenticação eletrônica",
 
     # --- BankMovements (expandidos de payments[0].bankMovements[0]) ---
-    "bankMovements_accountNumber":        "Conta corrente",
-    "bankMovements_historicName":         "Histórico",
-    "bankMovements_operationName":        "Descrição do pagamento",
+    "bankMovements_accountNumber": "Conta corrente", # pegou
+    "bankMovements_historicName": "Histórico", # pegou
+    "bankMovements_operationName": "Descrição do pagamento", # pegou
 }
 
 # Colunas que a API não fornece no endpoint bulk-data/v1/outcome
@@ -157,17 +157,17 @@ class ContasPagasTransformer:
 
         # Coluna derivada: Indexador composto "Cód - Nome"
         df["Indexador"] = (
-            df["outcome_indexerId"].astype(str)
-            + " - "
-            + df["outcome_indexerName"].astype(str)
+                df["outcome_indexerId"].astype(str)
+                + " - "
+                + df["outcome_indexerName"].astype(str)
         )
         df = df.drop(columns=["outcome_indexerId", "outcome_indexerName"], errors="ignore")
 
         # Coluna derivada: Grupo "Título/Parcela"
         df["Grupo"] = (
-            df["outcome_billId"].astype(str)
-            + "/"
-            + df["outcome_installmentId"].astype(str)
+                df["outcome_billId"].astype(str)
+                + "/"
+                + df["outcome_installmentId"].astype(str)
         )
 
         df = df.rename(columns=MAPPING_COLUMNS)
@@ -186,34 +186,113 @@ class ContasPagasTransformer:
     @staticmethod
     def _expand_payments(df: pd.DataFrame) -> pd.DataFrame:
         """
-        Expande outcome_payments[0] em colunas planas prefixadas com 'payments_'.
-        Expande payments[0].bankMovements[0] em colunas 'bankMovements_'.
+        Agrega todos os registros de outcome_payments em colunas planas.
+
+        Campos monetários são somados:
+            - grossAmount
+            - monetaryCorrectionAmount
+            - interestAmount
+            - fineAmount
+            - discountAmount
+            - taxAmount
+            - netAmount
+            - correctedNetAmount
+
+        Para bankMovements, mantém apenas o primeiro movimento encontrado
+        (mesma lógica anterior).
         """
         if "outcome_payments" not in df.columns:
             return df
 
-        def _first(lst):
-            return lst[0] if isinstance(lst, list) and lst else {}
+        def _aggregate_payments(payments):
+            if not isinstance(payments, list) or not payments:
+                return {}
+
+            result = {
+                "payments_grossAmount": 0.0,
+                "payments_monetaryCorrectionAmount": 0.0,
+                "payments_interestAmount": 0.0,
+                "payments_fineAmount": 0.0,
+                "payments_discountAmount": 0.0,
+                "payments_taxAmount": 0.0,
+                "payments_netAmount": 0.0,
+                "payments_correctedNetAmount": 0.0,
+
+                "payments_paymentDate": None,
+                "payments_calculationDate": None,
+                "payments_operationTypeName": None,
+                "payments_paymentAuthentication": None,
+
+                "payments_bankMovements": [],
+            }
+
+            for payment in payments:
+                if not isinstance(payment, dict):
+                    continue
+
+                result["payments_grossAmount"] += payment.get("grossAmount", 0) or 0
+                result["payments_monetaryCorrectionAmount"] += payment.get("monetaryCorrectionAmount", 0) or 0
+                result["payments_interestAmount"] += payment.get("interestAmount", 0) or 0
+                result["payments_fineAmount"] += payment.get("fineAmount", 0) or 0
+                result["payments_discountAmount"] += payment.get("discountAmount", 0) or 0
+                result["payments_taxAmount"] += payment.get("taxAmount", 0) or 0
+                result["payments_netAmount"] += payment.get("netAmount", 0) or 0
+                result["payments_correctedNetAmount"] += payment.get("correctedNetAmount", 0) or 0
+
+                # mantém o primeiro valor encontrado
+                if result["payments_paymentDate"] is None:
+                    result["payments_paymentDate"] = payment.get("paymentDate")
+
+                if result["payments_calculationDate"] is None:
+                    result["payments_calculationDate"] = payment.get("calculationDate")
+
+                if result["payments_operationTypeName"] is None:
+                    result["payments_operationTypeName"] = payment.get("operationTypeName")
+
+                if result["payments_paymentAuthentication"] is None:
+                    result["payments_paymentAuthentication"] = payment.get("paymentAuthentication")
+
+
+
+                bank_movements = payment.get("bankMovements", [])
+                if isinstance(bank_movements, list):
+                    result["payments_bankMovements"].extend(bank_movements)
+
+            return result
 
         payments_expanded = (
             df["outcome_payments"]
-            .apply(_first)
+            .apply(_aggregate_payments)
             .apply(pd.Series)
-            .rename(columns=lambda c: f"payments_{c}")
         )
 
         if "payments_bankMovements" in payments_expanded.columns:
+            def _first(lst):
+                return lst[0] if isinstance(lst, list) and lst else {}
+
             bm_expanded = (
                 payments_expanded["payments_bankMovements"]
                 .apply(_first)
                 .apply(pd.Series)
                 .rename(columns=lambda c: f"bankMovements_{c}")
             )
-            payments_expanded = payments_expanded.drop(columns=["payments_bankMovements"])
-            payments_expanded = pd.concat([payments_expanded, bm_expanded], axis=1)
+
+            payments_expanded = payments_expanded.drop(
+                columns=["payments_bankMovements"]
+            )
+
+            payments_expanded = pd.concat(
+                [payments_expanded, bm_expanded],
+                axis=1
+            )
 
         df = df.drop(columns=["outcome_payments"])
-        return pd.concat([df, payments_expanded], axis=1)
+
+        return pd.concat(
+            [df.reset_index(drop=True),
+             payments_expanded.reset_index(drop=True)],
+            axis=1
+        )
 
     @staticmethod
     def _expand_payments_categories(df: pd.DataFrame) -> pd.DataFrame:
@@ -231,13 +310,13 @@ class ContasPagasTransformer:
             .apply(_first)
             .apply(pd.Series)
             .rename(columns={
-                "costCenterId":           "Cód. centro de custo",
-                "costCenterName":         "Centro de custo",
-                "financialCategoryId":    "Cód. plano fin",
-                "financialCategoryName":  "Plano fin",
-                "financialCategoryRate":  "% apropriação financeira",
-                "projectId":              "Cód. obra (apropriação)",
-                "projectName":            "Obra (apropriação)",
+                "costCenterId": "Cód. centro de custo",
+                "costCenterName": "Centro de custo",
+                "financialCategoryId": "Cód. plano fin",
+                "financialCategoryName": "Plano fin",
+                "financialCategoryRate": "% apropriação financeira",
+                "projectId": "Cód. obra (apropriação)",
+                "projectName": "Obra (apropriação)",
             })
         )
 
