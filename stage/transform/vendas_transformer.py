@@ -107,54 +107,74 @@ RENAME_COLUMNS_VENDAS = {
 
 
 class VendasTransformer:
-    """
-    Transforma dados brutos de vendas em DataFrame analítico.
-
-    Pipeline de transformação:
-      1. Consolidar resultados de todas as empresas
-      2. Garantir presença das colunas esperadas
-      3. Aplicar tipos corretos
-      4. Remover duplicatas
-      5. Normalizar datas
-    """
 
     def transform(self, results: List[VendasExtractionResult]) -> pd.DataFrame:
-        """
-        Args:
-            results: saída de VendasExtractor.extract()
-
-        Returns:
-            DataFrame limpo e tipado. Vazio se nenhum dado foi extraído.
-        """
         sucessos = [r for r in results if r.sucesso and r.registros]
-
         if not sucessos:
             logger.warning("Nenhum dado disponível para transformação.")
             return pd.DataFrame()
 
         df = self._consolidate(sucessos)
-
-
-        df = df.rename(columns=RENAME_COLUMNS_VENDAS)
+        df = self._rename_columns(df)
+        df = self._cast_dates(df)
+        df = self._cast_numerics(df)
+        df = self._deduplicate(df)
+        df = self._add_derived_metrics(df)
 
         logger.info("Transformação concluída: %d registros finais.", len(df))
         return df
 
-    # ------------------------------------------------------------------
-    # Etapas do pipeline
-    # ------------------------------------------------------------------
-
-
-    # verificar o motivo de não estar entrando aqui
     @staticmethod
-    def _consolidate(results: List[VendasExtractionResult]) -> pd.DataFrame:
+    def _consolidate(results):
         frames = []
-        for result in results:
-            frame = pd.DataFrame(result.registros)
-            # Garante que enterpriseId veio da iteração (pode não vir na payload)
-            frame["enterpriseId"] = result.empresa_id
+        for r in results:
+            frame = pd.DataFrame(r.registros)
+            frame["enterpriseId"] = r.empresa_id
             frames.append(frame)
-        df = pd.concat(frames, ignore_index=True)
-        logger.debug("Consolidado: %d linhas de %d empresas.", len(df), len(results))
+        return pd.concat(frames, ignore_index=True)
+
+    @staticmethod
+    def _rename_columns(df):
+        return df.rename(columns=RENAME_COLUMNS_VENDAS)
+
+    @staticmethod
+    def _cast_dates(df):
+        date_cols = ["data_criacao_venda", "data_contrato", "data_emissao",
+                     "data_cancelamento", "data_entrega", "data_primeiro_pagamento"]
+        for col in date_cols:
+            if col in df.columns:
+                df[col] = pd.to_datetime(df[col], errors="coerce")
+        return df
+
+    @staticmethod
+    def _cast_numerics(df):
+        numeric_cols = ["valor_venda", "valor_total_venda", "area_privativa",
+                        "area_comum", "area_terreno", "percentual_participacao",
+                        "valor_total_condicao_pagamento", "numero_parcelas"]
+        for col in numeric_cols:
+            if col in df.columns:
+                df[col] = pd.to_numeric(df[col], errors="coerce")
+        return df
+
+    @staticmethod
+    def _deduplicate(df):
+        subset = ["id_venda", "id_unidade_detalhe",
+                  "id_tipo_condicao_pagamento", "id_corretor"]
+        subset_existing = [c for c in subset if c in df.columns]
+        before = len(df)
+        df = df.drop_duplicates(subset=subset_existing)
+        logger.debug("Deduplicação: %d → %d linhas.", before, len(df))
+        return df
+
+    @staticmethod
+    def _add_derived_metrics(df):
+        """Métricas calculadas equivalentes às medidas do painel Power BI."""
+        if "valor_venda" in df.columns and "area_privativa" in df.columns:
+            df["valor_por_m2"] = (
+                df["valor_venda"] / df["area_privativa"].replace(0, pd.NA)
+            )
+        if "valor_venda" in df.columns:
+            # flag para facilitar agrupamento de unidades únicas
+            df["_is_main_unit"] = df.get("unidade_principal", True)
         return df
 

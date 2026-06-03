@@ -14,8 +14,8 @@ import pandas as pd
 
 from stage.extract.vendas_extractor import VendasExtractor
 from stage.extract.contas_pagas_extractor import ContasPagasExtractor
-from transform.vendas_transformer import VendasTransformer
-from transform.contas_pagas_transformer import ContasPagasTransformer
+from stage.transform.vendas_transformer import VendasTransformer
+from stage.transform.contas_pagas_transformer import ContasPagasTransformer
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +93,7 @@ class ContasPagasDriver:
 
         logger.info("[2/2] Iniciando transformação...")
         df = self._transformer.transform(result)
-
+        print(df.columns)
         if df.empty:
             logger.error("Pipeline finalizado sem dados.")
             return df
@@ -110,7 +110,7 @@ if __name__ == "__main__":
 
     setup_logging()
 
-    output_path = Path(r"C:\Users\kaua.rodrigo\PycharmProjects\etl_api_sienge\stage\transform\files\input")
+    output_path = Path(r"D:\GitHub\etl_api_sienge\stage\transform\files\input")
 
     # --- Vendas ---
     # df_vendas = VendasDriver().run()
@@ -125,7 +125,7 @@ if __name__ == "__main__":
     if df_contas.empty:
         logger.error("Nenhum dado de contas pagas para exportar.")
     else:
-        df_contas.to_csv(output_path / "validacao_contas_pagas.csv", sep=";", index=False)
+        df_contas.to_csv(output_path / "contas_pagas.csv", sep=";", index=False)
         logger.info("Contas pagas salvas em: %s", output_path / "validacao_contas_pagas.csv")
 
     # if df_vendas.empty and df_contas.empty:
