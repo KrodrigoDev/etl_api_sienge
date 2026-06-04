@@ -46,7 +46,7 @@ MAPPING_COLUMNS = {
     # --- Valores base ---
     "outcome_originalAmount": "Valor bruto",
     "outcome_discountAmount": "Desconto",
-    "outcome_taxAmount": "Acréscimo",
+    "outcome_taxAmount": "Valor Imposto Retido",
     "outcome_balanceAmount": "Saldo em aberto",
     "outcome_correctedBalanceAmount": "Saldo corrigido em aberto",
 
@@ -66,10 +66,9 @@ MAPPING_COLUMNS = {
     "outcome_projectName": "Obra",
 
     # --- Payments (expandidos de outcome_payments[0]) ---
-    "payments_grossAmount": "Valor no vencimento", # pegou
-    "payments_taxAmount": "Valor Imposto Retido", # pegou
-    "payments_netAmount": "Valor líquido", # pegou
-    "payments_correctedNetAmount": "Valor da baixa", # pegou
+    # "payments_taxAmount": "Valor Imposto Retido",
+    "payments_correctedNetAmount": "Valor líquido",
+    "payments_grossAmount": "Valor da baixa",
     "payments_paymentDate": "Data do pagamento",
     "payments_calculationDate": "Data do cálculo",
     "payments_operationTypeName": "Tipo de operação",
@@ -215,7 +214,7 @@ class ContasPagasTransformer:
                 "payments_fineAmount": 0.0,
                 "payments_discountAmount": 0.0,
                 "payments_taxAmount": 0.0,
-                "payments_netAmount": 0.0,
+                # "payments_netAmount": 0.0,
                 "payments_correctedNetAmount": 0.0,
 
                 "payments_paymentDate": None,
@@ -236,8 +235,11 @@ class ContasPagasTransformer:
                 result["payments_fineAmount"] += payment.get("fineAmount", 0) or 0
                 result["payments_discountAmount"] += payment.get("discountAmount", 0) or 0
                 result["payments_taxAmount"] += payment.get("taxAmount", 0) or 0
-                result["payments_netAmount"] += payment.get("netAmount", 0) or 0
-                result["payments_correctedNetAmount"] += payment.get("correctedNetAmount", 0) or 0
+                # result["payments_netAmount"] += payment.get("netAmount", 0) or 0
+
+                corrected = payment.get("correctedNetAmount")
+                net = payment.get("netAmount", 0) or 0
+                result["payments_correctedNetAmount"] += corrected if corrected is not None else net
 
                 # mantém o primeiro valor encontrado
                 if result["payments_paymentDate"] is None:

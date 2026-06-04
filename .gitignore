@@ -1,3 +1,6 @@
-.env
-.csv
-.xlsx
+.venv/
+.idea/
+__pycache__/
+*.pyc
+*.csv
+*.xlsx

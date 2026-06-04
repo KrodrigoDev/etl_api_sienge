@@ -71,6 +71,7 @@ COLUNAS_INDISPONIVEIS_API = [
     "usuario_que_autorizou",
     "usuario_que_deu_ciencia",
     "vencimento_original",
+    "acrescimo"
 ]
 
 
@@ -141,9 +142,7 @@ def _faixa_saldo(saldo: pd.Series) -> pd.Series:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None:
-
     logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
-
 
     hoje = date.today()
 
@@ -154,7 +153,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df = normalizar_colunas(df)
 
     df['sigla_documento'] = df['sigla_documento'].apply(lambda x: str(x).strip())
-    df = df[~df['sigla_documento'].isin(['PCT', 'PER', 'PPC'])]
+    df = df[~df['sigla_documento'].isin(['PCT', 'PER', 'PPC', 'NR', 'PRV'])]  # verificar depois se são esses mesmo
 
     print(f"Total de linhas: {len(df):,}  |  colunas: {len(df.columns)}")
 
@@ -195,6 +194,12 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df["cod_credor"] = pd.to_numeric(df.get("cod_credor"), errors="coerce").astype("Int64")
 
     print(f"  saldo_em_aberto max: R$ {df['saldo_em_aberto'].max():,.2f}")
+
+    df['status_consistencia'] = df['status_consistencia'].map({
+        'S': 'Completo',
+        'N': 'Incompleto',
+        'I': 'Em inclusão',
+    })
 
     # ── 4. Campos calculados (substitutos dos que a API não entrega) ──────────
     print("\n── 4. Campos calculados ────────────────────────────────────────────")
@@ -294,6 +299,9 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df["titulo_pesquisa"] = np.where(
         df["titulo"].notna(), "t " + df["titulo"].astype(str), ""
     )
+
+    df["documento_pesquisa"] = df["sigla_documento"].astype(str) + " - " + df["documento"].astype(str)
+
     df["dias_titulo_c_obra"] = (df["data_de_cadastro"] - df["data_emissao"]).dt.days
     df["dias_ate_vencimento"] = (df["data_vencimento"] - df["data_de_cadastro"]).dt.days
     df["dias_atraso_pgto"] = (df["data_do_pagamento"] - df["data_vencimento"]).dt.days
@@ -301,7 +309,8 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
 
     def _faixa_titulo_c_obra(dias):
         bins = [-float("inf"), -1, 7, 15, 30, 60, float("inf")]
-        labels = ["A. Negativo (lançado antes da emissão)", "B. Até 7d", "C. 8-15d", "D. 16-30d", "E. 31-60d", "F. Acima 60d"]
+        labels = ["A. Negativo (lançado antes da emissão)", "B. Até 7d", "C. 8-15d", "D. 16-30d", "E. 31-60d",
+                  "F. Acima 60d"]
         return pd.cut(dias.fillna(0), bins=bins, labels=labels, right=True).astype(str)
 
     def _faixa_lancamento_ate_pgto(dias):
@@ -424,12 +433,12 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "id_origem", "id_forma_pagamento",
         # Chaves naturais
         "cod_empresa", "cod_credor", "titulo", "parcela", "grupo",
-        "sigla_documento", "documento", "nn_documento", "conta_contabil",
+        "sigla_documento", "documento", "nn_documento", "documento_pesquisa", "conta_contabil",
         # Datas
         "data_vencimento", "data_do_pagamento", "data_emissao",
         "data_de_competencia", "data_contabil", "data_de_cadastro", "vencimento_original",
         # Métricas financeiras
-        "valor_no_vencimento", "valor_bruto", "acrescimo", "desconto",
+        "valor_bruto", "desconto",
         "valor_imposto_retido", "valor_liquido", "valor_da_baixa", "saldo_em_aberto",
         # Prazo
         "dias_de_atraso", "diferenca_data_vencimento",
@@ -445,7 +454,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "flag_venceu_ontem", "flag_operacao_hoje", "flag_lancamento_retroativo",
         "flag_fonte_api",
         # Atributos de workflow / auditoria
-        "ciencia_do_titulo", "parcela_autorizada", "parcela_agrupada",
+        "status_consistencia", "ciencia_do_titulo", "parcela_autorizada", "parcela_agrupada",
         "titulo/parcela_agrupada", "nn_lote", "status_do_lote", "indexador",
         "tipo_de_operacao", "historico", "chave_nfe", "autenticacao_eletronica",
         "usuario_que_deu_ciencia", "usuario_que_autorizou",

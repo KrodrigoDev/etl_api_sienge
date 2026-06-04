@@ -7,7 +7,6 @@ Orquestra o fluxo completo:
 Os drivers NÃO contêm lógica de negócio: apenas conectam as peças.
 """
 import logging
-import sys
 from pathlib import Path
 
 import pandas as pd
