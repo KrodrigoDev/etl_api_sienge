@@ -1,6 +1,7 @@
 @echo off
 chcp 65001 > nul
 set PYTHONUNBUFFERED=1
+set PYTHONIOENCODING=utf-8
 
 cd /d C:\Users\kaua.rodrigo\PycharmProjects\etl_api_sienge
 

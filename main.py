@@ -12,10 +12,16 @@ from pathlib import Path
 import pandas as pd
 
 from stage.extract.vendas_extractor import VendasExtractor
-from stage.extract.contas_pagas_extractor import ContasPagasExtractor
 from stage.transform.vendas_transformer import VendasTransformer
+
+from stage.extract.contas_pagas_extractor import ContasPagasExtractor
 from stage.transform.contas_pagas_transformer import ContasPagasTransformer
-from stage.transform.contas_pagas_transformer_2 import executar
+from stage.transform.contas_pagas_transformer_2 import executar as executar_contas_pagas
+
+from stage.extract.contas_recebidas_extractor import ContasRecebidasExtractor
+from stage.transform.contas_recebidas_transformer import ContasRecebidasTransformer
+from stage.transform.contas_recebidas_transformer_2 import executar as executar_recebidas
+
 
 logger = logging.getLogger(__name__)
 
@@ -104,9 +110,53 @@ class ContasPagasDriver:
             logger.info("Contas pagas salvas em: %s", (INPUT_DIR / "contas_pagas.csv"))
 
         logger.info("[3/3] Iniciando última transformação...")
-        executar()
+        executar_contas_pagas()
 
         logger.info("=== Pipeline de Contas Pagas concluído: %d registros ===", len(df))
+
+# ------------------------------------------------------------------
+# ContasRecebidasDriver
+# ------------------------------------------------------------------
+class ContasRecebidasDriver:
+    """
+        Driver para o pipeline de Contas recebidas.
+
+        Uso típico:
+            df = ContasRecebidasDriver().run()
+
+        Para customizar componentes (ex: testes):
+            driver = ContasPagasDriver(extractor=mock_extractor)
+            df = driver.run()
+        """
+
+
+    def __init__(
+            self,
+            extractor: ContasRecebidasExtractor | None = None,
+            transformer: ContasRecebidasTransformer | None = None,
+    ):
+        self._extractor = extractor or ContasRecebidasExtractor()
+        self._transformer = transformer or ContasRecebidasTransformer()
+
+    def run(self):
+        logger.info("=== Pipeline de Contas Recebidas iniciado ===")
+
+        logger.info("[1/2] Iniciando extração...")
+        result = self._extractor.extract()
+
+        logger.info("[2/3] Iniciando primeira transformação...")
+        df = self._transformer.transform(result)
+
+        if df.empty:
+            logger.error("Pipeline finalizado sem dados.")
+        else:
+            df.to_csv((INPUT_DIR / "contas_recebidas.csv"), sep=";", index=False)
+            logger.info("Contas pagas salvas em: %s", (INPUT_DIR / "contas_recebidas_tratada.csv"))
+
+        logger.info("[3/3] Iniciando última transformação...")
+        executar_recebidas()
+
+        logger.info("=== Pipeline de Contas Recebidas concluído: %d registros ===", len(df))
 
 
 # ------------------------------------------------------------------
@@ -117,5 +167,6 @@ if __name__ == "__main__":
 
     setup_logging()
 
-    # --- Contas Pagas ---
+    # ContasRecebidasDriver().run()
+
     ContasPagasDriver().run()

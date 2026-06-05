@@ -1,5 +1,5 @@
 """
-stages/transform/transform_consulta_parcela.py
+stages/transform/contas_pagas_transformer_2.py
 -----------------------------------------------
 Versão adaptada para fonte via API (bulk-data/v1/outcome).
 

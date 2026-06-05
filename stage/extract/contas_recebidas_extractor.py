@@ -10,21 +10,11 @@ from typing import List
 
 import requests
 
-from config.settings import API_CONFIG
+from config.settings import API_CONFIG, ContasRecebidasConfig
 from drivers.api_requester import ApiRequester
 
 logger = logging.getLogger(__name__)
 
-
-# ---------------------------------------------------------------------------
-# Config
-# ---------------------------------------------------------------------------
-
-@dataclass(frozen=True)
-class ContasRecebidasConfig:
-    start_date: str = "2025-01-01"
-    end_date: str = "2050-01-01"
-    selection_type: str = "P"
 
 
 # ---------------------------------------------------------------------------

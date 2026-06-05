@@ -43,5 +43,15 @@ class ContasPagasConfig:
     with_bank_movements: bool = True
 
 
+@dataclass(frozen=True)
+class ContasRecebidasConfig:
+    """
+    Documentação: https://api.sienge.com.br/v1/docs/#tag/bulk-data-parcelas-do-contas-a-receber/get/bulk-data/v1/income
+    """
+    start_date: str = "2025-01-01"
+    end_date: str = "2050-01-01"
+    selection_type: str = "P"
+
+
 API_CONFIG = ApiConfig()
 VENDAS_CONFIG = VendasConfig()
