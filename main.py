@@ -19,8 +19,8 @@ from stage.transform.contas_pagas_transformer_2 import executar
 
 logger = logging.getLogger(__name__)
 
-
-output_path = Path(r"C:\Users\kaua.rodrigo\PycharmProjects\etl_api_sienge\stage\transform\files\input")
+pasta_origem = Path(__file__).resolve().parents[0]
+INPUT_DIR = pasta_origem / "stage" / "transform" / "files" / "input"
 
 
 # ------------------------------------------------------------------
@@ -100,8 +100,8 @@ class ContasPagasDriver:
         if df.empty:
             logger.error("Pipeline finalizado sem dados.")
         else:
-            df.to_csv(output_path / "contas_pagas.csv", sep=";", index=False)
-            logger.info("Contas pagas salvas em: %s", output_path / "contas_pagas.csv")
+            df.to_csv((INPUT_DIR / "contas_pagas.csv"), sep=";", index=False)
+            logger.info("Contas pagas salvas em: %s", (INPUT_DIR / "contas_pagas.csv"))
 
         logger.info("[3/3] Iniciando última transformação...")
         executar()

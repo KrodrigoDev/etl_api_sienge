@@ -66,7 +66,6 @@ MAPPING_COLUMNS = {
     "outcome_projectName": "Obra",
 
     # --- Payments (expandidos de outcome_payments[0]) ---
-    # "payments_taxAmount": "Valor Imposto Retido",
     "payments_correctedNetAmount": "Valor líquido",
     "payments_grossAmount": "Valor da baixa",
     "payments_paymentDate": "Data do pagamento",
@@ -74,15 +73,16 @@ MAPPING_COLUMNS = {
     "payments_operationTypeName": "Tipo de operação",
     "payments_paymentAuthentication": "Autenticação eletrônica",
 
-    # --- BankMovements (expandidos de payments[0].bankMovements[0]) ---
-    "bankMovements_accountNumber": "Conta corrente", # pegou
-    "bankMovements_historicName": "Histórico", # pegou
-    "bankMovements_operationName": "Descrição do pagamento", # pegou
+    # --- BankMovements (expandidos de payments[].bankMovements[0]) ---
+    "bankMovements_accountNumber": "Conta corrente",
+    "bankMovements_historicName": "Histórico",
+    "bankMovements_operationName": "Descrição do pagamento",
 }
 
 # Colunas que a API não fornece no endpoint bulk-data/v1/outcome
 # Listadas aqui apenas como documentação
 NOT_AVAILABLE_IN_API = [
+    "Acréscimo",  # outcome_taxAmount é imposto retido, não acréscimo
     "Cód. unid. construtiva", "Unid. construtiva",
     "Cód. Item orçamento", "Item orçamento", "% apropriação obra",
     "Cód. departamento", "Departamento", "% apropriação departamento",
@@ -105,7 +105,7 @@ NESTED_COLUMNS = {
     "outcome_payments",
 }
 
-# Colunas da API sem equivalente no relatório manual (mantidas com nome original)
+# Colunas da API sem equivalente no relatório manual (descartadas)
 EXTRA_API_COLUMNS_TO_DROP = {
     "payments_operationTypeId",
     "payments_monetaryCorrectionAmount",
@@ -113,6 +113,8 @@ EXTRA_API_COLUMNS_TO_DROP = {
     "payments_fineAmount",
     "payments_discountAmount",
     "payments_sequencialNumber",
+    "payments_taxAmount",
+    "payments_netAmount",
     "bankMovements_accountCompanyId",
     "bankMovements_accountType",
     "bankMovements_bankMovementDate",
@@ -131,6 +133,8 @@ EXTRA_API_COLUMNS_TO_DROP = {
     "Obra (apropriação)",
 }
 
+# outcome_taxAmount corrompido acima desse limite usa fallback via payments_netAmount
+_LIMITE_TAX_VALIDO = 1_000_000
 
 class ContasPagasTransformer:
     """
@@ -139,9 +143,16 @@ class ContasPagasTransformer:
     Pipeline:
       1. Montar DataFrame bruto
       2. Expandir sub-listas (payments, bankMovements, paymentsCategories)
-      3. Construir colunas derivadas (Indexador, Grupo)
+      3. Construir colunas derivadas (Indexador, Grupo, Valor líquido)
       4. Renomear conforme MAPPING_COLUMNS
       5. Descartar colunas sem uso
+
+    Notas sobre Valor líquido:
+      - Regra normal:   originalAmount - taxAmount
+      - Fallback:       soma dos payments[].netAmount
+        Ativado quando outcome_taxAmount > 1_000_000 (dado corrompido na API,
+        observado em ~148 registros na amostra de 15k).
+      - Sem pagamento:  NA (parcela ainda não baixada)
     """
 
     def transform(self, result: ContasPagasExtractionResult) -> pd.DataFrame:
@@ -156,18 +167,23 @@ class ContasPagasTransformer:
 
         # Coluna derivada: Indexador composto "Cód - Nome"
         df["Indexador"] = (
-                df["outcome_indexerId"].astype(str)
-                + " - "
-                + df["outcome_indexerName"].astype(str)
+            df["outcome_indexerId"].astype(str)
+            + " - "
+            + df["outcome_indexerName"].astype(str)
         )
         df = df.drop(columns=["outcome_indexerId", "outcome_indexerName"], errors="ignore")
 
         # Coluna derivada: Grupo "Título/Parcela"
         df["Grupo"] = (
-                df["outcome_billId"].astype(str)
-                + "/"
-                + df["outcome_installmentId"].astype(str)
+            df["outcome_billId"].astype(str)
+            + "/"
+            + df["outcome_installmentId"].astype(str)
         )
+
+        # Coluna derivada: Valor líquido
+        # outcome_taxAmount pode vir corrompido (valores absurdos > 1e6);
+        # nesses casos usa a soma de payments[].netAmount como fallback.
+        df["Valor líquido Calculado"] = df.apply(self._calcular_valor_liquido, axis=1)
 
         df = df.rename(columns=MAPPING_COLUMNS)
 
@@ -179,6 +195,23 @@ class ContasPagasTransformer:
         return df
 
     # ------------------------------------------------------------------
+    # Colunas derivadas
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _calcular_valor_liquido(row: pd.Series):
+        """
+        Valor líquido = originalAmount - taxAmount.
+        Fallback para payments_netAmount quando taxAmount está corrompido (> 1 milhão).
+        Retorna NA para parcelas sem pagamento registrado.
+        """
+        tax = row.get("outcome_taxAmount")
+        if pd.isna(tax) or tax > _LIMITE_TAX_VALIDO:
+            net = row.get("payments_netAmount")
+            return net if (pd.notna(net) and net > 0) else pd.NA
+        return row["outcome_originalAmount"] - tax
+
+    # ------------------------------------------------------------------
     # Expansão de sub-listas
     # ------------------------------------------------------------------
 
@@ -187,18 +220,14 @@ class ContasPagasTransformer:
         """
         Agrega todos os registros de outcome_payments em colunas planas.
 
-        Campos monetários são somados:
-            - grossAmount
-            - monetaryCorrectionAmount
-            - interestAmount
-            - fineAmount
-            - discountAmount
-            - taxAmount
-            - netAmount
-            - correctedNetAmount
+        Campos monetários somados:
+            grossAmount, monetaryCorrectionAmount, interestAmount,
+            fineAmount, discountAmount, taxAmount, netAmount, correctedNetAmount
 
-        Para bankMovements, mantém apenas o primeiro movimento encontrado
-        (mesma lógica anterior).
+        correctedNetAmount usa netAmount como fallback quando None
+        (ex.: operação do tipo "Abatimento de Adiantamento").
+
+        Para bankMovements, mantém apenas o primeiro movimento encontrado.
         """
         if "outcome_payments" not in df.columns:
             return df
@@ -214,14 +243,12 @@ class ContasPagasTransformer:
                 "payments_fineAmount": 0.0,
                 "payments_discountAmount": 0.0,
                 "payments_taxAmount": 0.0,
-                # "payments_netAmount": 0.0,
+                "payments_netAmount": 0.0,
                 "payments_correctedNetAmount": 0.0,
-
                 "payments_paymentDate": None,
                 "payments_calculationDate": None,
                 "payments_operationTypeName": None,
                 "payments_paymentAuthentication": None,
-
                 "payments_bankMovements": [],
             }
 
@@ -235,26 +262,20 @@ class ContasPagasTransformer:
                 result["payments_fineAmount"] += payment.get("fineAmount", 0) or 0
                 result["payments_discountAmount"] += payment.get("discountAmount", 0) or 0
                 result["payments_taxAmount"] += payment.get("taxAmount", 0) or 0
-                # result["payments_netAmount"] += payment.get("netAmount", 0) or 0
+                result["payments_netAmount"] += payment.get("netAmount", 0) or 0
 
                 corrected = payment.get("correctedNetAmount")
                 net = payment.get("netAmount", 0) or 0
                 result["payments_correctedNetAmount"] += corrected if corrected is not None else net
 
-                # mantém o primeiro valor encontrado
-                if result["payments_paymentDate"] is None:
+                if payment.get("paymentDate") is not None:
                     result["payments_paymentDate"] = payment.get("paymentDate")
-
                 if result["payments_calculationDate"] is None:
                     result["payments_calculationDate"] = payment.get("calculationDate")
-
                 if result["payments_operationTypeName"] is None:
                     result["payments_operationTypeName"] = payment.get("operationTypeName")
-
                 if result["payments_paymentAuthentication"] is None:
                     result["payments_paymentAuthentication"] = payment.get("paymentAuthentication")
-
-
 
                 bank_movements = payment.get("bankMovements", [])
                 if isinstance(bank_movements, list):
@@ -279,21 +300,14 @@ class ContasPagasTransformer:
                 .rename(columns=lambda c: f"bankMovements_{c}")
             )
 
-            payments_expanded = payments_expanded.drop(
-                columns=["payments_bankMovements"]
-            )
-
-            payments_expanded = pd.concat(
-                [payments_expanded, bm_expanded],
-                axis=1
-            )
+            payments_expanded = payments_expanded.drop(columns=["payments_bankMovements"])
+            payments_expanded = pd.concat([payments_expanded, bm_expanded], axis=1)
 
         df = df.drop(columns=["outcome_payments"])
 
         return pd.concat(
-            [df.reset_index(drop=True),
-             payments_expanded.reset_index(drop=True)],
-            axis=1
+            [df.reset_index(drop=True), payments_expanded.reset_index(drop=True)],
+            axis=1,
         )
 
     @staticmethod

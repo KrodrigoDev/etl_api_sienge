@@ -111,14 +111,24 @@ def _calcular_status_parcela(df: pd.DataFrame, hoje: date) -> pd.Series:
     Deriva status_da_parcela a partir dos campos disponíveis na API.
 
     Regra:
-      - data_do_pagamento preenchida                      → PAGA
-      - data_vencimento < hoje  e sem pagamento           → VENCIDA
-      - data_vencimento >= hoje e sem pagamento           → A_VENCER
+      - data_do_pagamento preenchida E saldo_em_aberto = 0  → PAGA
+      - data_vencimento < hoje  e não PAGA                  → VENCIDA
+      - data_vencimento >= hoje e não PAGA                  → A_VENCER
+
+    Nota: pagamento parcial (saldo > 0 mesmo com data_do_pagamento preenchida)
+    é tratado como VENCIDA ou A_VENCER conforme a data de vencimento,
+    pois ainda há saldo em aberto.
     """
     hoje_ts = pd.Timestamp(hoje)
+
+    paga = (
+            df["data_do_pagamento"].notna()
+            & (df["saldo_em_aberto"].fillna(0) == 0)
+    )
+
     status = pd.Series("A_VENCER", index=df.index)
     status[df["data_vencimento"] < hoje_ts] = "VENCIDA"
-    status[df["data_do_pagamento"].notna()] = "PAGA"
+    status[paga] = "PAGA"
     return status
 
 
@@ -438,7 +448,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "data_vencimento", "data_do_pagamento", "data_emissao",
         "data_de_competencia", "data_contabil", "data_de_cadastro", "vencimento_original",
         # Métricas financeiras
-        "valor_bruto", "desconto",
+        "valor_bruto", "desconto", "valor_liquido_calculado",
         "valor_imposto_retido", "valor_liquido", "valor_da_baixa", "saldo_em_aberto",
         # Prazo
         "dias_de_atraso", "diferenca_data_vencimento",
