@@ -225,6 +225,3 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "fato_contas_recebidas": fato,
     }.items():
         print(f"  {nome:<35} {str(tab.shape):>12}")
-
-
-executar()

@@ -53,5 +53,45 @@ class ContasRecebidasConfig:
     selection_type: str = "P"
 
 
+@dataclass(frozen=True)
+class TitulosContasPagasConfig:
+    """
+    Configuração para extração de títulos do contas a pagar.
+
+    Documentação: https://api.sienge.com.br/v1/docs/#/bills
+
+    Filtros opcionais deixados como None não são enviados na query string.
+    """
+    start_date: str = "2022-01-01"
+    end_date: str = "2050-12-31"
+    limit: int = 200  # máximo permitido pela API
+
+    # Filtros opcionais
+    debtor_id: int | None = None  # Código da empresa (debtorId)
+    creditor_id: int | None = None  # Código do credor
+    cost_center_id: int | None = None  # Código do centro de custo
+    documents_identification_id: str | None = None  # Ex.: "NF,REC"
+    document_number: str | None = None  # Número do documento (max 20 chars)
+    status: str | None = None  # "S" | "N" | "I"
+    origin_id: str | None = None  # "AC" | "CP" | "FP" | etc.
+
+
+@dataclass(frozen=True)
+class CredoresConfig:
+    """
+    Configuração para extração de credores.
+
+    Documentação: https://api.sienge.com.br/v1/docs/#/creditors
+
+    Sem filtros obrigatórios — sem informar nada, traz todos os credores.
+    cnpj aceita múltipla valores: cnpj=("79164911000104", "77288031000114")
+    """
+    limit: int = 200
+
+    # Filtros opcionais
+    cpf: str | None = None  # CPF sem máscara, só números
+    cnpj: tuple[str, ...] = ()  # CNPJs sem máscara, pode ser vários
+    creditor: str | None = None  # Nome, nome fantasia ou código do credor
+
+
 API_CONFIG = ApiConfig()
-VENDAS_CONFIG = VendasConfig()
