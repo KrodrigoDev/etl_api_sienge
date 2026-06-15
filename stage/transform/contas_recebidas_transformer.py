@@ -1,15 +1,15 @@
 import logging
-
-import pandas as pd
+import re
 import ast
 
+import pandas as pd
 
 from stage.extract.contas_recebidas_extractor import ContasRecebidasExtractionResult
 
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# Mapeamento: coluna da API → nome do relatório
+# Mapeamento: coluna interna → nome do relatório
 # =============================================================================
 MAPPING_COLUMNS = {
     # --- Empresa / estrutura ---
@@ -73,59 +73,65 @@ MAPPING_COLUMNS = {
 
     # --- Unidade / contrato ---
     "income_mainUnit": "Unidade",
-    "income_paymentTermName": "Forma de pagamento",  # expandido de income_paymentTerm
+    "income_paymentTermName": "Forma de pagamento",
     "income_bearerId": "Cód. portador",
 
-    # --- Receipts (expandidos de income_receipts) ---
+    # --- Receipts ---
+    "receipts_operationTypeId": "Tipo operação ID",
+    "receipts_operationTypeName": "Tipo de operação",
     "receipts_grossAmount": "Valor recebido",
-    "receipts_netAmount": "Valor líquido recebido",
+    "receipts_monetaryCorrectionAmount": "Correção monetária recebida",
     "receipts_interestAmount": "Juros recebidos",
     "receipts_fineAmount": "Multa recebida",
     "receipts_discountAmount": "Desconto recebido",
     "receipts_taxAmount": "Imposto retido recebido",
+    "receipts_netAmount": "Valor líquido recebido",
     "receipts_additionAmount": "Acréscimo recebido",
-    "receipts_paymentDate": "Data do recebimento",
+    "receipts_insuranceAmount": "Seguro recebido",
+    "receipts_dueAdmAmount": "Taxa adm. recebida",
     "receipts_calculationDate": "Data do cálculo",
-    "receipts_operationTypeName": "Tipo de operação",
+    "receipts_paymentDate": "Data do recebimento",
+    "receipts_accountCompanyId": "Cód. empresa conta",
     "receipts_accountNumber": "Conta corrente",
+    "receipts_accountType": "Tipo conta",
+    "receipts_sequencialNumber": "N° sequencial recebimento",
+    "receipts_indexerId": "Cód. indexador recebimento",
+    "receipts_embeddedInterestAmount": "Juros embutidos recebimento",
+    "receipts_creditDate": "Data crédito",
+    "receipts_proRata": "Pro rata",
 
-    # --- ReceiptsCategories (expandidos de income_receiptsCategories[0]) ---
-    "receiptsCategories_costCenterId": "Cód. centro de custo",
-    "receiptsCategories_costCenterName": "Centro de custo",
-    "receiptsCategories_financialCategoryId": "Cód. plano fin",
-    "receiptsCategories_financialCategoryName": "Plano fin",
-    "receiptsCategories_financialCategoryRate": "% apropriação financeira",
-}
+    # --- BankMovements ---
+    "bankMovements_id": "Bank Movement ID",
+    "bankMovements_bankMovementDate": "Data movimento bancário",
+    "bankMovements_sequencialNumber": "N° sequencial movimento",
+    "bankMovements_amount": "Valor movimento",
+    "bankMovements_historicId": "Cód. histórico bancário",
+    "bankMovements_historicName": "Histórico Bancário",
+    "bankMovements_operationId": "Cód. operação movimento",
+    "bankMovements_operationName": "Operação movimento",
+    "bankMovements_operationType": "Tipo operação movimento",
+    "bankMovements_reconcile": "Conciliado",
+    "bankMovements_correctedAmount": "Valor corrigido movimento",
+    "bankMovements_originId": "Origem movimento",
 
-# Colunas aninhadas removidas após expansão
-NESTED_COLUMNS = {
-    "income_receipts",
-    "income_receiptsCategories",
-    "income_paymentTerm",
-}
+    # --- FinancialCategories (via bankMovements) ---
+    "fc_bankMovementId": "Bank Movement ID (FC)",
+    "fc_costCenterId": "Cód. centro de custo",
+    "fc_costCenterName": "Centro de custo",
+    "fc_financialCategoryId": "Cód. plano fin",
+    "fc_financialCategoryName": "Plano fin",
+    "fc_financialCategoryRate": "% apropriação financeira",
+    "fc_financialCategoryReducer": "Redutor plano fin",
+    "fc_financialCategoryType": "Tipo plano fin",
 
-# Colunas da API sem equivalente no relatório (descartadas)
-EXTRA_API_COLUMNS_TO_DROP = {
-    "receipts_operationTypeId",
-    "receipts_monetaryCorrectionAmount",
-    "receipts_insuranceAmount",
-    "receipts_dueAdmAmount",
-    "receipts_accountCompanyId",
-    "receipts_accountType",
-    "receipts_sequencialNumber",
-    "receipts_indexerId",
-    "receipts_embeddedInterestAmount",
-    "receipts_creditDate",
-    "receipts_proRata",
-    "receipts_bankMovements",
-    "receiptsCategories_projectId",
-    "receiptsCategories_businessTypeId",
-    "receiptsCategories_businessAreaId",
-    "receiptsCategories_projectName",
-    "receiptsCategories_businessTypeName",
-    "receiptsCategories_businessAreaName",
-    "receiptsCategories_financialCategoryReducer",
-    "receiptsCategories_financialCategoryType",
+    # --- ReceiptsCategories ---
+    "receiptsCategories_costCenterId": "Cód. centro de custo (RC)",
+    "receiptsCategories_costCenterName": "Centro de custo (RC)",
+    "receiptsCategories_financialCategoryId": "Cód. plano fin (RC)",
+    "receiptsCategories_financialCategoryName": "Plano fin (RC)",
+    "receiptsCategories_financialCategoryRate": "% apropriação financeira (RC)",
+    "receiptsCategories_financialCategoryReducer": "Redutor plano fin (RC)",
+    "receiptsCategories_financialCategoryType": "Tipo plano fin (RC)",
 }
 
 
@@ -133,23 +139,58 @@ class ContasRecebidasTransformer:
     """
     Transforma dados brutos de contas recebidas em DataFrame analítico.
 
-    Pipeline:
-      1. Montar DataFrame bruto
-      2. Expandir income_paymentTerm (dict → campo plano)
-      3. Expandir income_receipts (lista → colunas agregadas)
-      4. Expandir income_receiptsCategories[0] (primeiro item)
-      5. Construir colunas derivadas (Indexador, Grupo)
-      6. Renomear conforme MAPPING_COLUMNS
-      7. Descartar colunas sem uso
-
-    Diferenças em relação ao ContasPagasTransformer:
-      - Entidade principal é Cliente (não Credor)
-      - Sub-lista é income_receipts (não outcome_payments)
-      - income_receipts não tem bankMovements aninhado relevante —
-        accountNumber já está no nível do receipt
-      - Campos extras: periodicidade, juros embutidos, unidade,
-        forma de pagamento, situação inadimplência, sub judice
+    Pipeline (equivalente ao Power Query):
+      1. Expandir income_paymentTerm  (dict → campo plano)
+      2. Explode income_receipts      → 1 linha por receipt
+      3. Expandir campos do receipt   → colunas planas receipts_*
+      4. Explode bankMovements        → 1 linha por bankMovement
+      5. Expandir campos do bm        → colunas planas bankMovements_*
+      6. Explode financialCategories  → 1 linha por categoria
+      7. Expandir campos da FC        → colunas planas fc_*
+      8. Explode income_receiptsCategories → 1 linha por categoria
+      9. Expandir campos da RC        → colunas planas receiptsCategories_*
+     10. Construir Indexador derivado
+     11. Renomear conforme MAPPING_COLUMNS
     """
+
+    # ------------------------------------------------------------------
+    # Parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_list(val) -> list:
+        """
+        Converte um valor (string, list, None, NaN) para list.
+        Remove sufixos espúrios como ']bankMovements' gerados pelo CSV.
+        """
+        if isinstance(val, list):
+            return val
+        s = str(val).strip()
+        if s in ("", "[]", "nan", "None"):
+            return []
+        # Remove lixo textual após o fechamento da lista principal
+        s = re.sub(r"\]([a-zA-Z_]+)$", "]", s)
+        try:
+            return ast.literal_eval(s)
+        except Exception:
+            return []
+
+    @staticmethod
+    def _parse_dict(val) -> dict:
+        """Converte um valor para dict."""
+        if isinstance(val, dict):
+            return val
+        s = str(val).strip()
+        if s in ("", "nan", "None"):
+            return {}
+        try:
+            return ast.literal_eval(s)
+        except Exception:
+            return {}
+
+    # ------------------------------------------------------------------
+    # Pipeline principal
+    # ------------------------------------------------------------------
 
     def transform(self, result: ContasRecebidasExtractionResult) -> pd.DataFrame:
         if not result.sucesso or not result.registros:
@@ -159,209 +200,147 @@ class ContasRecebidasTransformer:
         df = pd.DataFrame(result.registros)
 
         df = self._expand_payment_term(df)
-        df = self._expand_receipts(df)
-        df = self._expand_receipts_categories(df)
-
-        # Coluna derivada: Indexador composto "Cód - Nome"
-        df["Indexador"] = (
-            df["income_indexerId"].astype(str)
-            + " - "
-            + df["income_indexerName"].astype(str)
-        )
-        df = df.drop(columns=["income_indexerId", "income_indexerName"], errors="ignore")
+        df = self._explode_receipts(df)
+        df = self._explode_bank_movements(df)
+        df = self._explode_financial_categories(df)
+        df = self._explode_receipts_categories(df)
+        df = self._build_indexador(df)
 
         df = df.rename(columns=MAPPING_COLUMNS)
-
-        # Remove colunas aninhadas e extras sem uso
-        cols_to_drop = (NESTED_COLUMNS | EXTRA_API_COLUMNS_TO_DROP) & set(df.columns)
-        df = df.drop(columns=list(cols_to_drop), errors="ignore")
 
         logger.info("Transformação concluída: %d registros finais.", len(df))
         return df
 
     # ------------------------------------------------------------------
-    # Expansão de sub-estruturas
+    # Etapas individuais
     # ------------------------------------------------------------------
-    @staticmethod
-    def _parse(val):
-        if isinstance(val, list):
-            return val
 
-        if val is None:
-            return []
-
-        if isinstance(val, float) and pd.isna(val):
-            return []
-
-        txt = str(val).strip()
-
-        if txt in ("", "[]", "nan", "None"):
-            return []
-
-        try:
-            return ast.literal_eval(txt)
-        except Exception:
-            return []
-
-    @staticmethod
-    def _expand_payment_term(df: pd.DataFrame) -> pd.DataFrame:
+    def _expand_payment_term(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Expande income_paymentTerm {'id': 'PM', 'descrition': 'Parcelas Mensais'}
-        → income_paymentTermName (mantém apenas a descrição).
+        income_paymentTerm {'id': 'PM', 'descrition': 'Parcelas Mensais'}
+        → income_paymentTermName (apenas a descrição).
         """
         if "income_paymentTerm" not in df.columns:
             return df
 
-        def _extract_name(val):
-            if pd.isna(val) or str(val).strip() in ["nan", ""]:
-                return None
-            try:
-                import ast
-                parsed = ast.literal_eval(str(val))
-                if isinstance(parsed, dict):
-                    return parsed.get("descrition") or parsed.get("description")
-            except Exception:
-                pass
-            return None
+        df["income_paymentTermName"] = df["income_paymentTerm"].apply(
+            lambda v: (
+                self._parse_dict(v).get("descrition")
+                or self._parse_dict(v).get("description")
+            )
+        )
+        return df.drop(columns=["income_paymentTerm"])
 
-        df["income_paymentTermName"] = df["income_paymentTerm"].apply(_extract_name)
-        return df
-
-    @staticmethod
-    def _expand_receipts(df: pd.DataFrame) -> pd.DataFrame:
+    def _explode_receipts(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Agrega todos os registros de income_receipts em colunas planas.
+        Equivalente a:
+          Table.ExpandListColumn(..., "receipts")
+          Table.ExpandRecordColumn(..., "receipts", [...campos...])
 
-        Campos monetários somados:
-            grossAmount, monetaryCorrectionAmount, interestAmount,
-            fineAmount, discountAmount, taxAmount, netAmount,
-            additionAmount, insuranceAmount, dueAdmAmount
-
-        Para campos não monetários (data, tipo operação, conta),
-        mantém o último valor encontrado — alinhado com o comportamento
-        do relatório manual que exibe o pagamento mais recente.
+        Cada receipt vira uma linha separada.
         """
         if "income_receipts" not in df.columns:
             return df
 
-        def _aggregate_receipts(receipts):
-            if not isinstance(receipts, list) or not receipts:
-                return {}
+        df["income_receipts"] = df["income_receipts"].apply(self._parse_list)
+        df = df.explode("income_receipts", ignore_index=True)
 
-            result = {
-                "receipts_grossAmount": 0.0,
-                "receipts_monetaryCorrectionAmount": 0.0,
-                "receipts_interestAmount": 0.0,
-                "receipts_fineAmount": 0.0,
-                "receipts_discountAmount": 0.0,
-                "receipts_taxAmount": 0.0,
-                "receipts_netAmount": 0.0,
-                "receipts_additionAmount": 0.0,
-                "receipts_insuranceAmount": 0.0,
-                "receipts_dueAdmAmount": 0.0,
-                "receipts_paymentDate": None,
-                "receipts_calculationDate": None,
-                "receipts_operationTypeName": None,
-                "receipts_accountNumber": None,
-                "receipts_accountCompanyId": None,
-                "receipts_accountType": None,
-                "receipts_sequencialNumber": None,
-                "receipts_indexerId": None,
-                "receipts_embeddedInterestAmount": 0.0,
-                "receipts_creditDate": None,
-                "receipts_proRata": 0.0,
-                "receipts_operationTypeId": None,
-                "receipts_bankMovements": [],
-            }
-
-            for receipt in receipts:
-                if not isinstance(receipt, dict):
-                    continue
-
-                result["receipts_grossAmount"] += receipt.get("grossAmount", 0) or 0
-                result["receipts_monetaryCorrectionAmount"] += receipt.get("monetaryCorrectionAmount", 0) or 0
-                result["receipts_interestAmount"] += receipt.get("interestAmount", 0) or 0
-                result["receipts_fineAmount"] += receipt.get("fineAmount", 0) or 0
-                result["receipts_discountAmount"] += receipt.get("discountAmount", 0) or 0
-                result["receipts_taxAmount"] += receipt.get("taxAmount", 0) or 0
-                result["receipts_netAmount"] += receipt.get("netAmount", 0) or 0
-                result["receipts_additionAmount"] += receipt.get("additionAmount", 0) or 0
-                result["receipts_insuranceAmount"] += receipt.get("insuranceAmount", 0) or 0
-                result["receipts_dueAdmAmount"] += receipt.get("dueAdmAmount", 0) or 0
-                result["receipts_embeddedInterestAmount"] += receipt.get("embeddedInterestAmount", 0) or 0
-                result["receipts_proRata"] += receipt.get("proRata", 0) or 0
-
-                # Último valor encontrado (alinhado com relatório manual)
-                if receipt.get("paymentDate") is not None:
-                    result["receipts_paymentDate"] = receipt.get("paymentDate")
-                if receipt.get("calculationDate") is not None:
-                    result["receipts_calculationDate"] = receipt.get("calculationDate")
-                if receipt.get("operationTypeName") is not None:
-                    result["receipts_operationTypeName"] = receipt.get("operationTypeName")
-                if receipt.get("accountNumber") is not None:
-                    result["receipts_accountNumber"] = receipt.get("accountNumber")
-                if receipt.get("operationTypeId") is not None:
-                    result["receipts_operationTypeId"] = receipt.get("operationTypeId")
-                if receipt.get("accountCompanyId") is not None:
-                    result["receipts_accountCompanyId"] = receipt.get("accountCompanyId")
-                if receipt.get("accountType") is not None:
-                    result["receipts_accountType"] = receipt.get("accountType")
-                if receipt.get("sequencialNumber") is not None:
-                    result["receipts_sequencialNumber"] = receipt.get("sequencialNumber")
-                if receipt.get("indexerId") is not None:
-                    result["receipts_indexerId"] = receipt.get("indexerId")
-                if receipt.get("creditDate") is not None:
-                    result["receipts_creditDate"] = receipt.get("creditDate")
-
-                bm = receipt.get("bankMovements", [])
-                if isinstance(bm, list):
-                    result["receipts_bankMovements"].extend(bm)
-
-            return result
-
-        receipts_parsed = df["income_receipts"].apply(ContasRecebidasTransformer._parse)
-        receipts_expanded = receipts_parsed.apply(_aggregate_receipts).apply(pd.Series)
-
-        df = df.drop(columns=["income_receipts"])
-
+        receipts_df = (
+            df["income_receipts"]
+            .apply(lambda v: v if isinstance(v, dict) else {})
+            .apply(pd.Series)
+            .rename(columns=lambda c: f"receipts_{c}")
+        )
         return pd.concat(
-            [df.reset_index(drop=True), receipts_expanded.reset_index(drop=True)],
-            axis=1,
+            [df.drop(columns=["income_receipts"]), receipts_df], axis=1
         )
 
-    @staticmethod
-    def _expand_receipts_categories(df: pd.DataFrame) -> pd.DataFrame:
+    def _explode_bank_movements(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Expande income_receiptsCategories[0] → Centro de custo, Plano fin, etc.
-        Usa apenas o primeiro item (mesmo padrão do ContasPagasTransformer).
+        Equivalente a:
+          Table.ExpandListColumn(..., "bankMovements")
+          Table.ExpandRecordColumn(..., "bankMovements", [...campos...])
+
+        Nota: no dado bruto a chave do bankMovements é uma string vazia ''.
+        Após o expand de receipts ela vira a coluna 'receipts_'.
+        """
+        # A chave vazia do receipt vira a coluna 'receipts_' após o expand
+        bm_col = "receipts_"
+        if bm_col not in df.columns:
+            # Fallback: pode vir como 'receipts_bankMovements' se a API corrigir a chave
+            bm_col = "receipts_bankMovements"
+            if bm_col not in df.columns:
+                logger.warning("Coluna de bankMovements não encontrada; etapa ignorada.")
+                return df
+
+        df[bm_col] = df[bm_col].apply(
+            lambda v: v if isinstance(v, list) else []
+        )
+        df = df.explode(bm_col, ignore_index=True)
+
+        bm_df = (
+            df[bm_col]
+            .apply(lambda v: v if isinstance(v, dict) else {})
+            .apply(pd.Series)
+            .rename(columns=lambda c: f"bankMovements_{c}")
+        )
+        return pd.concat([df.drop(columns=[bm_col]), bm_df], axis=1)
+
+    def _explode_financial_categories(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Equivalente a:
+          Table.ExpandListColumn(..., "financialCategories")
+          Table.ExpandRecordColumn(..., "financialCategories", [...campos...])
+        """
+        fc_col = "bankMovements_financialCategories"
+        if fc_col not in df.columns:
+            return df
+
+        df[fc_col] = df[fc_col].apply(
+            lambda v: v if isinstance(v, list) else []
+        )
+        df = df.explode(fc_col, ignore_index=True)
+
+        fc_df = (
+            df[fc_col]
+            .apply(lambda v: v if isinstance(v, dict) else {})
+            .apply(pd.Series)
+            .rename(columns=lambda c: f"fc_{c}")
+        )
+        return pd.concat([df.drop(columns=[fc_col]), fc_df], axis=1)
+
+    def _explode_receipts_categories(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Equivalente a:
+          Table.ExpandListColumn(..., "receiptsCategories")
+          Table.ExpandRecordColumn(..., "receiptsCategories", [...campos...])
         """
         if "income_receiptsCategories" not in df.columns:
             return df
 
-        def _first(lst):
-            return lst[0] if isinstance(lst, list) and lst else {}
+        df["income_receiptsCategories"] = df["income_receiptsCategories"].apply(
+            self._parse_list
+        )
+        df = df.explode("income_receiptsCategories", ignore_index=True)
 
-        cats_expanded = (
+        rc_df = (
             df["income_receiptsCategories"]
-            .apply(ContasRecebidasTransformer._parse)
-            .apply(_first)
+            .apply(lambda v: v if isinstance(v, dict) else {})
             .apply(pd.Series)
-            .rename(columns={
-                "costCenterId": "receiptsCategories_costCenterId",
-                "costCenterName": "receiptsCategories_costCenterName",
-                "financialCategoryId": "receiptsCategories_financialCategoryId",
-                "financialCategoryName": "receiptsCategories_financialCategoryName",
-                "financialCategoryRate": "receiptsCategories_financialCategoryRate",
-                "financialCategoryReducer": "receiptsCategories_financialCategoryReducer",
-                "financialCategoryType": "receiptsCategories_financialCategoryType",
-                "projectId": "receiptsCategories_projectId",
-                "projectName": "receiptsCategories_projectName",
-                "businessTypeId": "receiptsCategories_businessTypeId",
-                "businessTypeName": "receiptsCategories_businessTypeName",
-                "businessAreaId": "receiptsCategories_businessAreaId",
-                "businessAreaName": "receiptsCategories_businessAreaName",
-            })
+            .rename(columns=lambda c: f"receiptsCategories_{c}")
+        )
+        return pd.concat(
+            [df.drop(columns=["income_receiptsCategories"]), rc_df], axis=1
         )
 
-        df = df.drop(columns=["income_receiptsCategories"])
-        return pd.concat([df, cats_expanded], axis=1)
+    @staticmethod
+    def _build_indexador(df: pd.DataFrame) -> pd.DataFrame:
+        """Coluna derivada: 'Cód - Nome' do indexador."""
+        if "income_indexerId" in df.columns and "income_indexerName" in df.columns:
+            df["Indexador"] = (
+                df["income_indexerId"].astype(str)
+                + " - "
+                + df["income_indexerName"].astype(str)
+            )
+            df = df.drop(columns=["income_indexerId", "income_indexerName"], errors="ignore")
+        return df

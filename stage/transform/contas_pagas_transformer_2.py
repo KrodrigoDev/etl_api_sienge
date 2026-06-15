@@ -175,12 +175,28 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     # Marca origem para rastreabilidade no BI
     df["flag_fonte_api"] = True
 
-    # ── 2. Deduplicação ───────────────────────────────────────────────────────
+    chave_titulo = ["grupo", "cod_empresa", "documento", "cod_credor", "titulo", "taxa_custo_edificio",
+                    "cod_plano_fin_(pc)", "cod_item_orcamento", "valor_da_baixa"]
+
     print(f"  Antes dedup:  {df.shape}")
-    df = df.drop_duplicates(
-        subset=["grupo", "cod_empresa", "documento", "cod_credor", "titulo"]
-    ).reset_index(drop=True)
+    df = df.drop_duplicates(subset=chave_titulo).reset_index(drop=True)
     print(f"  Após dedup:   {df.shape}")
+
+    df['valor_liquido_ajustado'] = np.where(
+        df['valor_liquido'].isna(),
+        0,
+        (
+                (df['valor_liquido']
+                 * df['%_apropriacao_financeira'] / 100)
+                * df['taxa_custo_edificio'] / 100
+        )
+    )
+
+    df['valor_liquido_ajustado_2'] = np.where(
+        df['valor_liquido_ajustado'].isna(),
+        df['valor_liquido'],
+        df['valor_liquido_ajustado']
+    )
 
     # ── 3. Conversão de tipos ─────────────────────────────────────────────────
 
@@ -289,7 +305,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
             | (
                     df["flag_venc_fds"]
                     & (df["proximo_util_apos_fds"].dt.normalize() == hoje_ts.normalize())
-                    & ~df["flag_paga"]
             )
     )
 
@@ -448,8 +463,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "data_vencimento", "data_do_pagamento", "data_emissao",
         "data_de_competencia", "data_contabil", "data_de_cadastro", "vencimento_original",
         # Métricas financeiras
-        "valor_bruto", "desconto", "valor_liquido_calculado",
-        "valor_imposto_retido", "valor_liquido", "valor_da_baixa", "saldo_em_aberto",
+        "valor_bruto", "correcao_monetaria", "juros", "multa", "desconto", "taxas",
+        "valor_liquido", "valor_da_baixa", "saldo_em_aberto",
+        "%_apropriacao_financeira", "taxa_custo_edificio", "valor_liquido_ajustado", "valor_liquido_ajustado_2",
+
         # Prazo
         "dias_de_atraso", "diferenca_data_vencimento",
         "faixa_atraso", "faixa_saldo", "faixa_saldo_fornecedor", "saldo_total_fornecedor",
@@ -466,10 +483,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         # Atributos de workflow / auditoria
         "status_consistencia", "ciencia_do_titulo", "parcela_autorizada", "parcela_agrupada",
         "titulo/parcela_agrupada", "nn_lote", "status_do_lote", "indexador",
-        "tipo_de_operacao", "historico", "chave_nfe", "autenticacao_eletronica",
+        "tipo_de_baixa", "chave_nfe", "autenticacao_eletronica",
         "usuario_que_deu_ciencia", "usuario_que_autorizou",
         "usuario_que_cadastrou", "usuario_que_alterou",
-        "observacao_do_titulo", "descricao_do_pagamento",
+        "observacao_do_titulo",
         "titulo_pesquisa", "nn_lote_pesquisa",
 
         "cod_centro_de_custo", "centro_de_custo"
@@ -509,7 +526,15 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         .astype(int).astype(str)
     )
 
-    print(dim_conta_cc.head())
+    df_auxiliar = pd.read_csv((REFERENCE_DIR / "auxiliar_gabriel.csv"), sep=',')
+
+    dim_conta_cc = pd.merge(
+        dim_conta_cc, df_auxiliar[['Centro de Custo 2', 'Cod. Centro de Custo', 'Classificação 1', 'Classificação 2']],
+        left_on='cod_obra', right_on='Cod. Centro de Custo', how='left'
+    )
+
+    for col in ['empresa', 'Centro de Custo 2', 'obra', 'tipo_obra']:
+        dim_conta_cc[col] = dim_conta_cc[col].apply(lambda x: str(x).capitalize() if pd.notna(x) else pd.NA)
 
     DOCS_ESPECIAIS: set[str] = {"FL", "TRCT"}
 
@@ -547,6 +572,11 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     salvar_tabela(dim_tipo_baixa, "dim_tipo_baixa", output_dir)
     salvar_tabela(dim_origem, "dim_origem", output_dir)
     salvar_tabela(dim_conta_cc, "dim_conta_cc", output_dir)
+    salvar_tabela(fato, "fato_contas_pagas", output_dir)
+
+    _chave_titulo = ["grupo", "cod_empresa", "documento", "cod_credor", "titulo"]
+
+    fato.drop_duplicates(subset=_chave_titulo, inplace=True, keep="first")
     salvar_tabela(fato, "fato_consulta_parcela", output_dir)
 
     print("\n── Resumo ──────────────────────────────────────────────────────────")

@@ -240,7 +240,7 @@ if __name__ == "__main__":
 
     # ContasRecebidasDriver().run()
 
-    # ContasPagasDriver().run()
+    ContasPagasDriver().run()
 
     # TitulosDriver().run()
     # CredoresDriver().run()

@@ -39,10 +39,15 @@ df_sienge = pd.merge(df_titulo, dim_credor_receita, left_on='credor', right_on='
 
 dia_extracao = datetime.now().strftime("%d.%m.%Y")
 
-files = (INPUT_DIR / 'servico_tomado' / dia_extracao).rglob('*.csv*')
-df_giss = pd.concat([pd.read_csv(f, sep=';', decimal=',') for f in files],
-                    ignore_index=True, )
+files = (INPUT_DIR / 'servico_tomado' / "12.06.2026").rglob('*.csv*')
 
+dfs = []
+for file in files:
+    print(f'lendo arquivo: {file.name}')
+    df = pd.read_csv(file, sep=';', decimal=',')
+    dfs.append(df)
+
+df_giss = pd.concat(dfs, ignore_index=True)
 
 def ler_auxiliar_empresas():
     df_empresa = pd.read_excel(

@@ -1,4 +1,7 @@
+import json
 import logging
+import re
+import ast
 
 import pandas as pd
 
@@ -7,7 +10,7 @@ from stage.extract.contas_pagas_extractor import ContasPagasExtractionResult
 logger = logging.getLogger(__name__)
 
 # =============================================================================
-# Mapeamento: coluna da API → nome do relatório manual
+# Mapeamento: coluna interna → nome do relatório manual
 # =============================================================================
 MAPPING_COLUMNS = {
     # --- Empresa / estrutura ---
@@ -43,10 +46,9 @@ MAPPING_COLUMNS = {
     "outcome_consistencyStatus": "Status consistência",
     "outcome_authorizationStatus": "Parcela autorizada",
 
-    # --- Valores base ---
-    "outcome_originalAmount": "Valor bruto",
-    "outcome_discountAmount": "Desconto",
-    "outcome_taxAmount": "Valor Imposto Retido",
+    # # --- Valores base ---
+    # "outcome_discountAmount": "Desconto",
+    # "outcome_taxAmount": "Valor Imposto Retido",
     "outcome_balanceAmount": "Saldo em aberto",
     "outcome_correctedBalanceAmount": "Saldo corrigido em aberto",
 
@@ -65,24 +67,74 @@ MAPPING_COLUMNS = {
     "outcome_projectId": "Cód. obra",
     "outcome_projectName": "Obra",
 
-    # --- Payments (expandidos de outcome_payments[0]) ---
-    "payments_correctedNetAmount": "Valor líquido",
-    "payments_grossAmount": "Valor da baixa",
+    # --- Payments ---
+    # "payments_correctedNetAmount": "Valor líquido",
+    "outcome_originalAmount": "Valor bruto",
+    "payments_grossAmount": "Valor da baixa", # por algum motivo isso é usado como bruto
+    "payments_monetaryCorrectionAmount": "Correção monetária",
+    "payments_interestAmount": "Juros",
+    "payments_fineAmount": "Multa",
+    "payments_discountAmount": "Desconto",
+    "payments_taxAmount": "Taxas",
+    "payments_netAmount": "Valor líquido",
     "payments_paymentDate": "Data do pagamento",
     "payments_calculationDate": "Data do cálculo",
-    "payments_operationTypeName": "Tipo de operação",
+    "payments_operationTypeName": "Tipo de Baixa",
+    "payments_operationTypeId": "Tipo operação ID",
     "payments_paymentAuthentication": "Autenticação eletrônica",
+    "payments_sequencialNumber": "N° sequencial pagamento",
 
-    # --- BankMovements (expandidos de payments[].bankMovements[0]) ---
-    "bankMovements_accountNumber": "Conta corrente",
-    "bankMovements_historicName": "Histórico",
-    "bankMovements_operationName": "Descrição do pagamento",
+    # --- BankMovements ---
+    # "bankMovements_id": "Bank Movement ID",
+    # "bankMovements_accountNumber": "Conta corrente",
+    # "bankMovements_historicName": "Histórico",
+    # "bankMovements_operationName": "Descrição do pagamento",
+    # "bankMovements_bankMovementDate": "Data movimento bancário",
+    # "bankMovements_sequencialNumber": "N° sequencial movimento",
+    # "bankMovements_amount": "Valor movimento",
+    # "bankMovements_historicId": "Cód. histórico bancário",
+    # "bankMovements_operationId": "Cód. operação movimento",
+    # "bankMovements_operationType": "Tipo operação movimento",
+    # "bankMovements_reconcile": "Conciliado",
+    # "bankMovements_originId": "Origem movimento",
+    # "bankMovements_accountCompanyId": "Cód. empresa conta",
+    # "bankMovements_accountType": "Tipo conta",
+
+    # --- PaymentCategories (via bankMovements) ---
+    "paymentCategories_costCenterId": "Cód. centro de custo",
+    "paymentCategories_costCenterName": "Centro de custo",
+    "paymentCategories_financialCategoryId": "Cód. plano fin",
+    "paymentCategories_financialCategoryName": "Plano fin",
+    "paymentCategories_financialCategoryReducer": "Redutor plano fin",
+    "paymentCategories_financialCategoryType": "Tipo plano fin",
+
+    # --- PaymentsCategories (outcome nível) ---
+    "paymentsCategories_costCenterId": "Cód. centro de custo",
+    "paymentsCategories_costCenterName": "Centro de custo",
+    "paymentsCategories_financialCategoryId": "Cód. plano fin (PC)",
+    "paymentsCategories_financialCategoryName": "Plano fin (PC)",
+    "paymentsCategories_financialCategoryRate": "% apropriação financeira",
+    "paymentsCategories_financialCategoryReducer": "Redutor plano fin (PC)",
+    "paymentsCategories_financialCategoryType": "Tipo plano fin (PC)",
+    "paymentsCategories_projectId": "Cód. obra (apropriação)",
+    "paymentsCategories_projectName": "Obra (apropriação)",
+
+    # --- BuildingsCosts ---
+    "buildingscosts_buildingId": "Cód. edificio",
+    "buildingscosts_buildingName": "Edificio",
+    "buildingscosts_buildingUnitId": "Cód. unidade construtiva",
+    "buildingscosts_buildingUnitName": "Unidade construtiva",
+    "buildingscosts_costEstimationSheetId": "Cód. item orçamento",
+    "buildingscosts_costEstimationSheetName": "Item orçamento",
+    "buildingscosts_rate": "taxa_custo_edificio",
 }
 
+# outcome_taxAmount corrompido acima desse limite usa fallback via payments_netAmount
+_LIMITE_TAX_VALIDO = 1_000_000
+
 # Colunas que a API não fornece no endpoint bulk-data/v1/outcome
-# Listadas aqui apenas como documentação
 NOT_AVAILABLE_IN_API = [
-    "Acréscimo",  # outcome_taxAmount é imposto retido, não acréscimo
+    "Acréscimo",
     "Cód. unid. construtiva", "Unid. construtiva",
     "Cód. Item orçamento", "Item orçamento", "% apropriação obra",
     "Cód. departamento", "Departamento", "% apropriação departamento",
@@ -91,69 +143,117 @@ NOT_AVAILABLE_IN_API = [
     "Parcela agrupada", "Título/Parcela agrupada", "Tipo credor", "Cheque",
     "Usuário que deu ciência", "Usuário que autorizou",
     "Usuário que alterou", "Data de alteração",
-    "Conta contábil", "Data de competência", "Tipo de baixa",
+    "Conta contábil", "Data de competência",
     "CNPJ/CPF", "Chave NFE", "Informações bancárias do Credor",
     "Pix do credor", "Forma de pagamento",
     "Observação do título", "Observação da baixa", "Ações",
 ]
 
-# Colunas aninhadas removidas após expansão
-NESTED_COLUMNS = {
-    "outcome_paymentsCategories",
-    "outcome_departamentsCosts",
-    "outcome_buildingsCosts",
-    "outcome_payments",
-}
-
-# Colunas da API sem equivalente no relatório manual (descartadas)
-EXTRA_API_COLUMNS_TO_DROP = {
-    "payments_operationTypeId",
-    "payments_monetaryCorrectionAmount",
-    "payments_interestAmount",
-    "payments_fineAmount",
-    "payments_discountAmount",
-    "payments_sequencialNumber",
-    "payments_taxAmount",
-    "payments_netAmount",
-    "bankMovements_accountCompanyId",
-    "bankMovements_accountType",
-    "bankMovements_bankMovementDate",
-    "bankMovements_sequencialNumber",
-    "bankMovements_id",
-    "bankMovements_amount",
-    "bankMovements_historicId",
-    "bankMovements_operationId",
-    "bankMovements_operationType",
-    "bankMovements_reconcile",
-    "bankMovements_originId",
-    "bankMovements_paymentCategories",
-    "financialCategoryReducer",
-    "financialCategoryType",
-    "Cód. obra (apropriação)",
-    "Obra (apropriação)",
-}
-
-# outcome_taxAmount corrompido acima desse limite usa fallback via payments_netAmount
-_LIMITE_TAX_VALIDO = 1_000_000
 
 class ContasPagasTransformer:
     """
     Transforma dados brutos de contas pagas em DataFrame analítico.
 
+    Hierarquia de aninhamento da API:
+        outcome (título/parcela)
+        ├── payments[ ]                     → 1 linha por payment
+        │   └── bankMovements[ ]            → 1 linha por bankMovement
+        │       └── paymentCategories[ ]    → 1 linha por categoria financeira do bm
+        ├── paymentsCategories[ ]           → produto cartesiano com bankMovements
+        └── buildingsCosts[ ]              → produto cartesiano com paymentsCategories
+
+    O resultado final é o produto:
+        payments × bankMovements × paymentCategories(bm) × paymentsCategories × buildingsCosts
+
+    Isso é intencional: cada linha representa a alocação de custo na intersecção
+    (movimento bancário × plano financeiro do outcome × unidade construtiva),
+    permitindo ao Power BI agregar por qualquer combinação dessas dimensões.
+
+    CHAVE DE DEDUPLICAÇÃO CORRETA no transformer_2:
+        ['outcome_billId', 'outcome_installmentId', 'outcome_companyId',
+         'bankMovements_id', 'paymentsCategories_financialCategoryId',
+         'buildingscosts_costEstimationSheetId']
+
     Pipeline:
-      1. Montar DataFrame bruto
-      2. Expandir sub-listas (payments, bankMovements, paymentsCategories)
-      3. Construir colunas derivadas (Indexador, Grupo, Valor líquido)
-      4. Renomear conforme MAPPING_COLUMNS
-      5. Descartar colunas sem uso
+      1. Explode outcome_payments           → 1 linha por payment
+      2. Expandir campos do payment         → colunas planas payments_*
+      3. Explode bankMovements              → 1 linha por bankMovement
+      4. Expandir campos do bm             → colunas planas bankMovements_*
+      5. Explode paymentCategories(bm)      → 1 linha por categoria do bm
+      6. Expandir campos da PC(bm)         → colunas planas paymentCategories_*
+      7. Explode paymentsCategories(outcome)→ produto ×  bankMovements
+      8. Expandir campos da PC(outcome)    → colunas planas paymentsCategories_*
+      9. Explode buildingsCosts            → produto × paymentsCategories
+     10. Expandir campos do bc             → colunas planas buildingscosts_*
+     11. Construir colunas derivadas (Indexador, Grupo, Valor líquido)
+     12. Renomear conforme MAPPING_COLUMNS
 
     Notas sobre Valor líquido:
       - Regra normal:   originalAmount - taxAmount
-      - Fallback:       soma dos payments[].netAmount
-        Ativado quando outcome_taxAmount > 1_000_000 (dado corrompido na API,
-        observado em ~148 registros na amostra de 15k).
-      - Sem pagamento:  NA (parcela ainda não baixada)
+      - Fallback:       payments_netAmount quando taxAmount > 1_000_000 (dado corrompido na API)
+      - Sem pagamento:  NA
     """
+
+    # ------------------------------------------------------------------
+    # Parsing
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _parse_list(val) -> list:
+        """
+        Converte string/None/NaN para list.
+
+        Tenta json.loads primeiro (16× mais rápido que ast.literal_eval).
+        Usa ast.literal_eval como fallback para strings com sintaxe Python
+        (aspas simples, None, True/False).
+        Remove sufixos espúrios do CSV (ex: "]outcome_payments").
+        """
+        if isinstance(val, list):
+            return val
+        s = str(val).strip()
+        if s in ("", "[]", "nan", "None"):
+            return []
+
+        # Remove sufixo espúrio que aparece quando o CSV é gravado sem quoting correto
+        s = re.sub(r"\]([a-zA-Z_]+)$", "]", s)
+
+        # Tenta JSON primeiro (mais rápido): normaliza sintaxe Python → JSON
+        s_json = (
+            s
+            .replace("'", '"')
+            .replace(": None", ": null")
+            .replace(":None", ": null")
+            .replace("True", "true")
+            .replace("False", "false")
+        )
+        try:
+            return json.loads(s_json)
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # Fallback para ast.literal_eval (lida com casos que json.loads não consegue)
+        try:
+            return ast.literal_eval(s)
+        except Exception:
+            return []
+
+    @staticmethod
+    def _expand_records(series: pd.Series, prefix: str) -> pd.DataFrame:
+        """
+        Expande uma Series de dicts em colunas planas com prefixo.
+
+        Usa pd.json_normalize ao invés de apply(pd.Series):
+        ~11× mais rápido e preserva o índice original.
+        """
+        records = [v if isinstance(v, dict) else {} for v in series]
+        result = pd.json_normalize(records)
+        result.columns = [f"{prefix}{c}" for c in result.columns]
+        result.index = series.index
+        return result
+
+    # ------------------------------------------------------------------
+    # Pipeline principal
+    # ------------------------------------------------------------------
 
     def transform(self, result: ContasPagasExtractionResult) -> pd.DataFrame:
         if not result.sucesso or not result.registros:
@@ -162,179 +262,131 @@ class ContasPagasTransformer:
 
         df = pd.DataFrame(result.registros)
 
-        df = self._expand_payments(df)
-        df = self._expand_payments_categories(df)
-
-        # Coluna derivada: Indexador composto "Cód - Nome"
-        df["Indexador"] = (
-            df["outcome_indexerId"].astype(str)
-            + " - "
-            + df["outcome_indexerName"].astype(str)
-        )
-        df = df.drop(columns=["outcome_indexerId", "outcome_indexerName"], errors="ignore")
-
-        # Coluna derivada: Grupo "Título/Parcela"
-        df["Grupo"] = (
-            df["outcome_billId"].astype(str)
-            + "/"
-            + df["outcome_installmentId"].astype(str)
-        )
-
-        # Coluna derivada: Valor líquido
-        # outcome_taxAmount pode vir corrompido (valores absurdos > 1e6);
-        # nesses casos usa a soma de payments[].netAmount como fallback.
-        df["Valor líquido Calculado"] = df.apply(self._calcular_valor_liquido, axis=1)
+        df = self._explode_payments(df)
+        # df = self._explode_bank_movements(df)
+        df = self._explode_payment_categories(df)
+        df = self._explode_payments_categories(df)
+        df = self._explode_buildingscosts(df)
+        df = self._build_derived_columns(df)
 
         df = df.rename(columns=MAPPING_COLUMNS)
 
-        # Remove colunas aninhadas não expandidas e extras sem uso
-        cols_to_drop = (NESTED_COLUMNS | EXTRA_API_COLUMNS_TO_DROP) & set(df.columns)
+        cols_to_drop = {"outcome_departamentsCosts"} & set(df.columns)
         df = df.drop(columns=list(cols_to_drop), errors="ignore")
 
         logger.info("Transformação concluída: %d registros finais.", len(df))
         return df
 
     # ------------------------------------------------------------------
-    # Colunas derivadas
+    # Etapas individuais
     # ------------------------------------------------------------------
 
-    @staticmethod
-    def _calcular_valor_liquido(row: pd.Series):
-        """
-        Valor líquido = originalAmount - taxAmount.
-        Fallback para payments_netAmount quando taxAmount está corrompido (> 1 milhão).
-        Retorna NA para parcelas sem pagamento registrado.
-        """
-        tax = row.get("outcome_taxAmount")
-        if pd.isna(tax) or tax > _LIMITE_TAX_VALIDO:
-            net = row.get("payments_netAmount")
-            return net if (pd.notna(net) and net > 0) else pd.NA
-        return row["outcome_originalAmount"] - tax
-
-    # ------------------------------------------------------------------
-    # Expansão de sub-listas
-    # ------------------------------------------------------------------
-
-    @staticmethod
-    def _expand_payments(df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Agrega todos os registros de outcome_payments em colunas planas.
-
-        Campos monetários somados:
-            grossAmount, monetaryCorrectionAmount, interestAmount,
-            fineAmount, discountAmount, taxAmount, netAmount, correctedNetAmount
-
-        correctedNetAmount usa netAmount como fallback quando None
-        (ex.: operação do tipo "Abatimento de Adiantamento").
-
-        Para bankMovements, mantém apenas o primeiro movimento encontrado.
-        """
+    def _explode_payments(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Explode outcome_payments → 1 linha por payment."""
         if "outcome_payments" not in df.columns:
             return df
 
-        def _aggregate_payments(payments):
-            if not isinstance(payments, list) or not payments:
-                return {}
+        df["outcome_payments"] = df["outcome_payments"].apply(self._parse_list)
+        df = df.explode("outcome_payments", ignore_index=True)
 
-            result = {
-                "payments_grossAmount": 0.0,
-                "payments_monetaryCorrectionAmount": 0.0,
-                "payments_interestAmount": 0.0,
-                "payments_fineAmount": 0.0,
-                "payments_discountAmount": 0.0,
-                "payments_taxAmount": 0.0,
-                "payments_netAmount": 0.0,
-                "payments_correctedNetAmount": 0.0,
-                "payments_paymentDate": None,
-                "payments_calculationDate": None,
-                "payments_operationTypeName": None,
-                "payments_paymentAuthentication": None,
-                "payments_bankMovements": [],
-            }
+        pay_df = self._expand_records(df["outcome_payments"], "payments_")
+        return pd.concat([df.drop(columns=["outcome_payments"]), pay_df], axis=1)
 
-            for payment in payments:
-                if not isinstance(payment, dict):
-                    continue
+    def _explode_bank_movements(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Explode payments_bankMovements → 1 linha por bankMovement."""
+        bm_col = "payments_bankMovements"
+        if bm_col not in df.columns:
+            logger.warning("Coluna %s não encontrada; etapa ignorada.", bm_col)
+            return df
 
-                result["payments_grossAmount"] += payment.get("grossAmount", 0) or 0
-                result["payments_monetaryCorrectionAmount"] += payment.get("monetaryCorrectionAmount", 0) or 0
-                result["payments_interestAmount"] += payment.get("interestAmount", 0) or 0
-                result["payments_fineAmount"] += payment.get("fineAmount", 0) or 0
-                result["payments_discountAmount"] += payment.get("discountAmount", 0) or 0
-                result["payments_taxAmount"] += payment.get("taxAmount", 0) or 0
-                result["payments_netAmount"] += payment.get("netAmount", 0) or 0
+        df[bm_col] = df[bm_col].apply(lambda v: v if isinstance(v, list) else [])
+        df = df.explode(bm_col, ignore_index=True)
 
-                corrected = payment.get("correctedNetAmount")
-                net = payment.get("netAmount", 0) or 0
-                result["payments_correctedNetAmount"] += corrected if corrected is not None else net
+        bm_df = self._expand_records(df[bm_col], "bankMovements_")
+        return pd.concat([df.drop(columns=[bm_col]), bm_df], axis=1)
 
-                if payment.get("paymentDate") is not None:
-                    result["payments_paymentDate"] = payment.get("paymentDate")
-                if result["payments_calculationDate"] is None:
-                    result["payments_calculationDate"] = payment.get("calculationDate")
-                if result["payments_operationTypeName"] is None:
-                    result["payments_operationTypeName"] = payment.get("operationTypeName")
-                if result["payments_paymentAuthentication"] is None:
-                    result["payments_paymentAuthentication"] = payment.get("paymentAuthentication")
-
-                bank_movements = payment.get("bankMovements", [])
-                if isinstance(bank_movements, list):
-                    result["payments_bankMovements"].extend(bank_movements)
-
-            return result
-
-        payments_expanded = (
-            df["outcome_payments"]
-            .apply(_aggregate_payments)
-            .apply(pd.Series)
-        )
-
-        if "payments_bankMovements" in payments_expanded.columns:
-            def _first(lst):
-                return lst[0] if isinstance(lst, list) and lst else {}
-
-            bm_expanded = (
-                payments_expanded["payments_bankMovements"]
-                .apply(_first)
-                .apply(pd.Series)
-                .rename(columns=lambda c: f"bankMovements_{c}")
-            )
-
-            payments_expanded = payments_expanded.drop(columns=["payments_bankMovements"])
-            payments_expanded = pd.concat([payments_expanded, bm_expanded], axis=1)
-
-        df = df.drop(columns=["outcome_payments"])
-
-        return pd.concat(
-            [df.reset_index(drop=True), payments_expanded.reset_index(drop=True)],
-            axis=1,
-        )
-
-    @staticmethod
-    def _expand_payments_categories(df: pd.DataFrame) -> pd.DataFrame:
+    def _explode_payment_categories(self, df: pd.DataFrame) -> pd.DataFrame:
         """
-        Expande outcome_paymentsCategories[0] → Centro de custo, Plano fin, etc.
+        Explode bankMovements_paymentCategories → 1 linha por categoria do bankMovement.
+
+        Esta é a categoria financeira associada ao movimento bancário (paymentCategories),
+        diferente de paymentsCategories que é a categoria do título (outcome).
+        """
+        pc_col = "bankMovements_paymentCategories"
+        if pc_col not in df.columns:
+            return df
+
+        df[pc_col] = df[pc_col].apply(lambda v: v if isinstance(v, list) else [])
+        df = df.explode(pc_col, ignore_index=True)
+
+        pc_df = self._expand_records(df[pc_col], "paymentCategories_")
+        return pd.concat([df.drop(columns=[pc_col]), pc_df], axis=1)
+
+    def _explode_payments_categories(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Explode outcome_paymentsCategories → produto cartesiano com as linhas de bankMovements.
+
+        paymentsCategories é a decomposição do título por plano financeiro (nível outcome),
+        independente dos bankMovements. Cada linha já existente é replicada para cada
+        categoria financeira — isso é intencional para permitir alocação de custo.
+
+        A explosão de buildingsCosts em seguida completa o produto:
+            bankMovements × paymentsCategories × buildingsCosts
         """
         if "outcome_paymentsCategories" not in df.columns:
             return df
 
-        def _first(lst):
-            return lst[0] if isinstance(lst, list) and lst else {}
+        df["outcome_paymentsCategories"] = df["outcome_paymentsCategories"].apply(self._parse_list)
+        df = df.explode("outcome_paymentsCategories", ignore_index=True)
 
-        cats_expanded = (
-            df["outcome_paymentsCategories"]
-            .apply(_first)
-            .apply(pd.Series)
-            .rename(columns={
-                "costCenterId": "Cód. centro de custo",
-                "costCenterName": "Centro de custo",
-                "financialCategoryId": "Cód. plano fin",
-                "financialCategoryName": "Plano fin",
-                "financialCategoryRate": "% apropriação financeira",
-                "projectId": "Cód. obra (apropriação)",
-                "projectName": "Obra (apropriação)",
-            })
-        )
+        cats_df = self._expand_records(df["outcome_paymentsCategories"], "paymentsCategories_")
+        return pd.concat([df.drop(columns=["outcome_paymentsCategories"]), cats_df], axis=1)
 
-        df = df.drop(columns=["outcome_paymentsCategories"])
-        return pd.concat([df, cats_expanded], axis=1)
+    def _explode_buildingscosts(self, df: pd.DataFrame) -> pd.DataFrame:
+        """
+        Explode outcome_buildingsCosts → produto cartesiano com paymentsCategories.
+
+        buildingsCosts é a decomposição do título por unidade construtiva (nível outcome),
+        independente de paymentsCategories. Cada linha já existente é replicada para cada
+        unidade construtiva — completando o produto cartesiano intencional.
+
+        RESULTADO ESPERADO por título com N paymentsCategories e M buildingsCosts:
+            linhas_bm × N × M
+        onde linhas_bm = número de bankMovements (1 quando sem pagamento registrado).
+
+        CHAVE DE DEDUP CORRETA no transformer_2 para evitar duplicatas reais:
+            ['outcome_billId', 'outcome_installmentId', 'outcome_companyId',
+             'bankMovements_id',
+             'paymentsCategories_financialCategoryId',
+             'buildingscosts_costEstimationSheetId']
+        """
+        if "outcome_buildingsCosts" not in df.columns:
+            return df
+
+        df["outcome_buildingsCosts"] = df["outcome_buildingsCosts"].apply(self._parse_list)
+        df = df.explode("outcome_buildingsCosts", ignore_index=True)
+
+        bc_df = self._expand_records(df["outcome_buildingsCosts"], "buildingscosts_")
+        return pd.concat([df.drop(columns=["outcome_buildingsCosts"]), bc_df], axis=1)
+
+    def _build_derived_columns(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Constrói Indexador, Grupo e Valor líquido calculado."""
+
+        # Indexador composto "Cód - Nome"
+        if "outcome_indexerId" in df.columns and "outcome_indexerName" in df.columns:
+            df["Indexador"] = (
+                df["outcome_indexerId"].astype(str)
+                + " - "
+                + df["outcome_indexerName"].astype(str)
+            )
+            df = df.drop(columns=["outcome_indexerId", "outcome_indexerName"], errors="ignore")
+
+        # Grupo "Título/Parcela"
+        if "outcome_billId" in df.columns and "outcome_installmentId" in df.columns:
+            df["Grupo"] = (
+                df["outcome_billId"].astype(str)
+                + "/"
+                + df["outcome_installmentId"].astype(str)
+            )
+
+        return df

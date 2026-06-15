@@ -74,6 +74,18 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df = pd.read_csv((input_dir / "contas_recebidas.csv"), sep=';')
     df = normalizar_colunas(df)
 
+    df["cod_centro_de_custo"] = (
+        df["cod_centro_de_custo"]
+        .replace('', np.nan)
+        .fillna(df["cod_centro_de_custo_(rc)"])
+    )
+
+    df["centro_de_custo"] = (
+        df["centro_de_custo"]
+        .replace('', np.nan)
+        .fillna(df["centro_de_custo_(rc)"])
+    )
+
     df['sigla_documento'] = df['sigla_documento'].apply(lambda x: str(x).strip())
 
     print(f"Total de linhas: {len(df):,}  |  colunas: {len(df.columns)}")
@@ -203,7 +215,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "flag_fonte_api", "flag_pago_antecipado", "flag_pago_atraso",
 
         # Atributos de workflow / auditoria
-        "situacao_inadimplencia", "forma_de_pagamento", "tipo_de_operacao", "conta_corrente", "indexador",
+        "situacao_inadimplencia", "forma_de_pagamento", "tipo_de_operacao", "conta_corrente", "indexador","historico_bancario", "bank_movement_id",
 
         "cod_centro_de_custo", "centro_de_custo"
     ]].copy()
