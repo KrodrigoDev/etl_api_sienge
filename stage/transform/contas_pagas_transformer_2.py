@@ -424,6 +424,26 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     origens = df["origem"].dropna().unique().tolist()
     dim_origem = pd.DataFrame({"id_origem": range(1, len(origens) + 1), "origem": origens})
 
+    _dim_documento_path = output_dir / "dim_documento.csv"
+    if _dim_documento_path.exists():
+        dim_documento = pd.read_csv(_dim_documento_path, sep=";")
+        dim_documento = expandir_dimensao(
+            dim_existente=dim_documento,
+            df_novo=df,
+            colunas_naturais=["sigla_documento", "documento", 'documento_pesquisa'],
+            nome_id="id_documento",
+            col_pk_natural="documento",
+        )
+        print(f"  dim_documento carregada e expandida: {dim_documento.shape}")
+    else:
+        print("  dim_documento.csv não encontrado — criando do zero.")
+        dim_documento = criar_dimensao(
+            df,
+            colunas=["sigla_documento", "documento", 'documento_pesquisa'],
+            nome_id="id_documento",
+        )
+        print(f"  dim_documento criada: {dim_empresa.shape}")
+
     # ── 8. Surrogate keys ─────────────────────────────────────────────────────
     print("\n── 8. Surrogate keys ───────────────────────────────────────────────")
 
@@ -431,6 +451,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     _forn_map = dim_fornecedor.drop_duplicates("cod_credor").set_index("cod_credor")["id_fornecedor"].to_dict()
     _status_map = dim_status.set_index("status_parcela")["id_status"].to_dict()
     _origem_map = dim_origem.set_index("origem")["id_origem"].to_dict()
+    _doc_map = dim_documento.set_index("documento")["id_documento"].to_dict()
 
     df["cod_credor_lookup"] = df["cod_credor"].fillna(0).astype(int)
     df["id_empresa"] = df["cod_empresa"].map(_emp_map)
@@ -439,6 +460,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df["id_tipo_baixa"] = 0  # indisponível
     df["id_origem"] = df["origem"].map(_origem_map)
     df["id_forma_pagamento"] = pd.NA  # indisponível
+    df["id_documento"] = df["documento"].map(_doc_map)
 
     for col_id in ("id_empresa", "id_fornecedor", "id_status", "id_origem"):
         n = df[col_id].notna().sum()
@@ -455,10 +477,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     fato = df[[
         # Surrogate keys
         "id_empresa", "id_fornecedor", "id_status", "id_tipo_baixa",
-        "id_origem", "id_forma_pagamento",
+        "id_origem", "id_forma_pagamento", "id_documento",
         # Chaves naturais
-        "cod_empresa", "cod_credor", "titulo", "parcela", "grupo",
-        "sigla_documento", "documento", "nn_documento", "documento_pesquisa", "conta_contabil",
+        "cod_empresa", "cod_credor", "titulo", "parcela", "grupo", "sigla_documento",
+        "nn_documento", "conta_contabil",
         # Datas
         "data_vencimento", "data_do_pagamento", "data_emissao",
         "data_de_competencia", "data_contabil", "data_de_cadastro", "vencimento_original",
@@ -563,6 +585,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     checar_integridade(fato, "id_fornecedor", dim_fornecedor, "id_fornecedor", "fato → dim_fornecedor")
     checar_integridade(fato, "id_status", dim_status, "id_status", "fato → dim_status")
     checar_integridade(fato, "id_origem", dim_origem, "id_origem", "fato → dim_origem")
+    checar_integridade(fato, "id_documento",dim_documento, "id_documento","fato → dim_documento")
 
     # ── 12. Exportação ────────────────────────────────────────────────────────
     print("\n── 12. Exportação ──────────────────────────────────────────────────")
@@ -572,9 +595,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     salvar_tabela(dim_tipo_baixa, "dim_tipo_baixa", output_dir)
     salvar_tabela(dim_origem, "dim_origem", output_dir)
     salvar_tabela(dim_conta_cc, "dim_conta_cc", output_dir)
+    salvar_tabela(dim_documento, "dim_documento", output_dir)
     salvar_tabela(fato, "fato_contas_pagas", output_dir)
 
-    _chave_titulo = ["grupo", "cod_empresa", "documento", "cod_credor", "titulo"]
+    _chave_titulo = ["grupo", "cod_empresa", "id_documento", "cod_credor", "titulo"]
 
     fato.drop_duplicates(subset=_chave_titulo, inplace=True, keep="first")
     salvar_tabela(fato, "fato_consulta_parcela", output_dir)

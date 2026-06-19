@@ -23,6 +23,8 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select, WebDriverWait
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, InvalidSessionIdException, WebDriverException
+from bs4 import BeautifulSoup
+
 
 from src.drivers.selenium_requester import SeleniumRequester
 
@@ -37,7 +39,7 @@ pasta_origem = Path(__file__).resolve().parents[2]
 
 dia_extracao = datetime.now().strftime("%d.%m.%Y")
 
-INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / dia_extracao
+INPUT_DIR = pasta_origem / 'stages' / 'transform' / 'input' / 'servico_tomado' / "19.06.2026"
 INPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 
@@ -452,40 +454,47 @@ def extrair_todas_paginas(driver, wdw) -> list[dict]:
 
 def extrair_notas_tabela(driver) -> list[dict]:
     """
-    Extrai todas as linhas visíveis da tabela de NFS-e.
-    Retorna lista de dicts com os campos de cada nota.
+    Captura o HTML da tabela de uma vez via JS (imune a StaleElement)
+    e parseia com BeautifulSoup.
     """
-    linhas = driver.find_elements(
-        By.XPATH,
-        '//table[contains(@class,"table")]//tbody/tr[contains(@ng-repeat,"nota")]'
-    )
+    # Captura o HTML estático da tabela inteira em um único roundtrip
+    html_tabela = driver.execute_script("""
+        var tabela = document.querySelector('table.table tbody');
+        return tabela ? tabela.innerHTML : '';
+    """)
+
+    if not html_tabela:
+        logger.warning("Tabela não encontrada via JS.")
+        return []
+
+    soup = BeautifulSoup(html_tabela, 'html.parser')
+    linhas = soup.select('tr[ng-repeat*="nota"]')
 
     logger.info(f"Notas encontradas na página: {len(linhas)}")
     notas = []
 
     for i, linha in enumerate(linhas):
         try:
-            colunas = linha.find_elements(By.TAG_NAME, 'td')
+            colunas = linha.find_all('td')
 
-            # índices conforme o HTML analisado:
-            # 0=Competência, 1=NFS, 4=Controle, 5=Emissão,
-            # 7=CNPJ/CPF, 8=Prestador, 9=Atividade, 11=Valor, 12=Situação, 13=Declaração
+            def get_col(idx: int) -> str:
+                if idx >= len(colunas):
+                    return ''
+                return colunas[idx].get_text(strip=True)
 
             nota = {
-                'competencia': colunas[0].text.strip() if len(colunas) > 0 else '',
-                'nfs': colunas[1].text.strip() if len(colunas) > 1 else '',
-                'emissao': colunas[5].text.strip() if len(colunas) > 5 else '',
-                'cnpj_cpf': colunas[7].text.strip() if len(colunas) > 7 else '',
-                'prestador': colunas[8].text.strip() if len(colunas) > 8 else '',
-                'atividade': colunas[9].text.strip() if len(colunas) > 9 else '',
-                'valor': colunas[11].text.strip() if len(colunas) > 11 else '',
-                'situacao': colunas[12].text.strip() if len(colunas) > 12 else '',
-                'declaracao': colunas[13].text.strip() if len(colunas) > 13 else '',
+                'competencia': get_col(0),
+                'nfs':         get_col(1),
+                'emissao':     get_col(5),
+                'cnpj_cpf':    get_col(7),
+                'prestador':   get_col(8),
+                'atividade':   get_col(9),
+                'valor':       get_col(11),
+                'situacao':    get_col(12),
+                'declaracao':  get_col(13),
             }
-
             notas.append(nota)
 
-            # simula "leitura" ocasional da linha
             if random.random() < 0.15:
                 pausa_humana(0.3, 1.0)
 
@@ -565,11 +574,11 @@ def processar_empresa(driver, wdw, req, cnpj: str, competencia: str, novo_cnpj: 
 
 
 MES_INICIAL = 1
-MES_FINAL = 5
+MES_FINAL = 6
 
 
 def main():
-    req = SeleniumRequester(profile='Edge_02', download_dir=None)
+    req = SeleniumRequester(profile='Edge_03', download_dir=None)
     driver = req.get_driver()
     wdw = req.waiter(driver)
 
@@ -597,17 +606,18 @@ def main():
 
     for emp in empresas:
         cnpj = emp['cnpj']
-
         cnpj_normalizado = normalizar_cnpj(cnpj)
-
         path_cnpj = INPUT_DIR / cnpj_normalizado
-
         arquivos_csv = list(path_cnpj.glob('competencia_*.csv'))
-        if path_cnpj.exists() and len(arquivos_csv) >= 5:
-            logger.info(f'Pulando {cnpj} — {len(arquivos_csv)} competências já extraídas')
+        qtd_arquivos = len(arquivos_csv)
+
+        if path_cnpj.exists() and qtd_arquivos >= 6:
+            logger.info(f'Pulando {cnpj} — {qtd_arquivos} competências já extraídas')
             continue
 
         path_cnpj.mkdir(parents=True, exist_ok=True)
+
+        empresa_logada = False  # ← controla se já fez login/seleção nesta empresa
 
         for mes in range(MES_INICIAL, MES_FINAL + 1):
 
@@ -621,26 +631,25 @@ def main():
                     driver, wdw, req,
                     cnpj,
                     competencia=f'{mes:02d}/2026',
-                    novo_cnpj=(mes == MES_INICIAL),
+                    novo_cnpj=not empresa_logada,  # ← faz login só se ainda não logou
                 )
-
+                empresa_logada = True
                 salvar_notas(notas, path_cnpj, cnpj, mes)
 
-
             except (InvalidSessionIdException, WebDriverException) as e:
+                logger.error(e.message)
                 logger.error(f"Sessão inválida em {cnpj} {mes:02d}/2026 — reiniciando driver.")
                 driver, wdw = reiniciar_driver(req, driver)
+                empresa_logada = False  # ← força novo login no retry
 
-                # Retenta a mesma competência com novo_cnpj=True
                 try:
                     notas = processar_empresa(
                         driver, wdw, req, cnpj,
                         competencia=f'{mes:02d}/2026',
-                        novo_cnpj=(mes == MES_INICIAL),
+                        novo_cnpj=True,  # ← sempre loga após reinício
                     )
-
+                    empresa_logada = True
                     salvar_notas(notas, path_cnpj, cnpj, mes)
-
 
                 except Exception as e2:
                     logger.exception(f"Falhou após reinício: {e2}")

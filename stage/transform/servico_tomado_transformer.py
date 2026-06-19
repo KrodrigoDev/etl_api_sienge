@@ -39,7 +39,7 @@ df_sienge = pd.merge(df_titulo, dim_credor_receita, left_on='credor', right_on='
 
 dia_extracao = datetime.now().strftime("%d.%m.%Y")
 
-files = (INPUT_DIR / 'servico_tomado' / "12.06.2026").rglob('*.csv*')
+files = (INPUT_DIR / 'servico_tomado' / "19.06.2026").rglob('*.csv*')
 
 dfs = []
 for file in files:

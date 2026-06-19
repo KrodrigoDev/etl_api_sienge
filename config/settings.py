@@ -54,6 +54,16 @@ class ContasRecebidasConfig:
 
 
 @dataclass(frozen=True)
+class ContasAReceberConfig:
+    """
+    Documentação: https://api.sienge.com.br/v1/docs/#tag/bulk-data-parcelas-do-contas-a-receber
+    """
+    start_date: str = "2025-01-01"
+    end_date: str = "2050-01-01"
+    selection_type: str = "D"
+
+
+@dataclass(frozen=True)
 class TitulosContasPagasConfig:
     """
     Configuração para extração de títulos do contas a pagar.

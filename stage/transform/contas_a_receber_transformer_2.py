@@ -1,11 +1,11 @@
 """
-stages/transform/contas_recebidas_transformer_2.py
+stages/transform/contas_a_receber_transformer_2.py
 -----------------------------------------------
 """
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 from pathlib import Path
 import logging
 
@@ -38,7 +38,6 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
 def _parse_date(series: pd.Series) -> pd.Series:
     """Tenta ISO 8601 (API) e DD/MM/YYYY (CSV manual)."""
-
     parsed = pd.to_datetime(series, format="%Y-%m-%d", errors="coerce")
 
     mask_nat = parsed.isna()
@@ -46,7 +45,7 @@ def _parse_date(series: pd.Series) -> pd.Series:
         parsed.loc[mask_nat] = pd.to_datetime(
             series.loc[mask_nat],
             format="%d/%m/%Y",
-            errors="coerce"
+            errors="coerce",
         )
 
     return parsed
@@ -61,102 +60,69 @@ def _faixa_saldo(saldo: pd.Series) -> pd.Series:
     return pd.cut(saldo.fillna(0), bins=bins, labels=labels, right=True)
 
 
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PONTO DE ENTRADA
 # ─────────────────────────────────────────────────────────────────────────────
 
 def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+    )
 
     # ── 1. Leitura ────────────────────────────────────────────────────────────
     print("\n── 1. Leitura ──────────────────────────────────────────────────────")
 
-    df = pd.read_csv((input_dir / "contas_recebidas.csv"), sep=';')
+    df = pd.read_csv(input_dir / "contas_a_receber.csv", sep=";")
     df = normalizar_colunas(df)
 
     df["cod_centro_de_custo"] = (
         df["cod_centro_de_custo"]
-        .replace('', np.nan)
+        .replace("", np.nan)
         .fillna(df["cod_centro_de_custo_(rc)"])
     )
 
     df["centro_de_custo"] = (
         df["centro_de_custo"]
-        .replace('', np.nan)
+        .replace("", np.nan)
         .fillna(df["centro_de_custo_(rc)"])
     )
 
-    df['sigla_documento'] = df['sigla_documento'].apply(lambda x: str(x).strip())
+    df["sigla_documento"] = df["sigla_documento"].apply(lambda x: str(x).strip())
 
     print(f"Total de linhas: {len(df):,}  |  colunas: {len(df.columns)}")
 
     # Marca origem para rastreabilidade no BI
     df["flag_fonte_api"] = True
 
+    # ── 2. Datas ──────────────────────────────────────────────────────────────
     COLUNAS_DATA = [
         "data_vencimento", "data_emissao", "data_contabil", "data_base",
-        "data_do_recebimento", "data_do_calculo"
+        "data_do_recebimento", "data_do_calculo",
     ]
 
     for col in COLUNAS_DATA:
         if col in df.columns:
             df[col] = _parse_date(df[col])
 
+    # ── 3. Tipos numéricos ────────────────────────────────────────────────────
     df["titulo"] = pd.to_numeric(df.get("titulo"), errors="coerce").astype("Int64")
     df["cod_empresa"] = pd.to_numeric(df.get("cod_empresa"), errors="coerce").astype("Int64")
     df["cod_cliente"] = pd.to_numeric(df.get("cod_cliente"), errors="coerce").astype("Int64")
     df["cod_centro_de_custo"] = pd.to_numeric(df.get("cod_centro_de_custo"), errors="coerce").astype("Int64")
 
-    # ── 5. Flags calculadas ───────────────────────────────────────────────────
-    print("\n── 5. Flags calculadas ─────────────────────────────────────────────")
 
-    df["flag_pago_antecipado"] = (
-            df["data_do_recebimento"].notna()
-            & df["data_vencimento"].notna()
-            & (df["data_do_recebimento"] < df["data_vencimento"])
-    )
-    df["flag_pago_atraso"] = (
-            df["data_do_recebimento"].notna()
-            & df["data_vencimento"].notna()
-            & (df["data_do_recebimento"] > df["data_vencimento"])
-    )
+    # ── 5. Campos de pesquisa e prazo ─────────────────────────────────────────
+    print("\n── 5. Campos de pesquisa e prazo ───────────────────────────────────")
 
-    # ── 6. Campos de pesquisa e prazo ─────────────────────────────────────────
     df["titulo_pesquisa"] = np.where(
         df["titulo"].notna(), "t " + df["titulo"].astype(str), ""
     )
 
-    df["documento_pesquisa"] = df["sigla_documento"].astype(str) + " - " + df["documento"].astype(str)
-
-    df["dias_atraso_pgto"] = (df["data_do_recebimento"] - df["data_vencimento"]).dt.days
-    df["dias_emissao_ate_pgto"] = (df["data_do_recebimento"] - df["data_emissao"]).dt.days
-
-    def _faixa_emissao_ate_pgto(dias):
-        bins = [-float("inf"), -1, 0, 15, 30, float("inf")]
-        labels = [
-            "A. Retroativo (pago antes)",
-            "B. Mesmo dia",
-            "C. 1-15d",
-            "D. 16-30d",
-            "E. Acima 30d",
-        ]
-
-        faixa = pd.cut(dias, bins=bins, labels=labels, right=True)
-
-        return (
-            faixa
-            .astype("object")
-            .fillna("F. Não pago")
-        )
-
-    def _faixa_atraso_pgto(dias):
-        bins = [-float("inf"), -1, 0, 7, 30, float("inf")]
-        labels = ["A. Antecipado", "B. No prazo", "C. Atraso leve (1-7d)", "D. Atraso médio (8-30d)",
-                  "E. Atraso grave (30+d)"]
-        return pd.cut(dias.fillna(0), bins=bins, labels=labels, right=True).astype(str)
-
-    df["faixa_emissao_ate_pgto"] = _faixa_emissao_ate_pgto(df["dias_emissao_ate_pgto"])
-    df["faixa_atraso_pgto"] = _faixa_atraso_pgto(df["dias_atraso_pgto"])
+    df["documento_pesquisa"] = (
+        df["sigla_documento"].astype(str) + " - " + df["documento"].astype(str)
+    )
 
     # ── 7. Dimensões ──────────────────────────────────────────────────────────
     print("\n── 7. Dimensões ────────────────────────────────────────────────────")
@@ -201,7 +167,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         )
         print(f"  dim_empresa criada: {dim_empresa.shape}")
 
-        # ── Mapeamento Forma de Pagamento ───────────────────────────────────────────
+    # ── Mapeamento Forma de Pagamento ───────────────────────────────────────────
 
     MAPEAMENTO_FORMA_PAGAMENTO = {
         "Permuta": ("PE", "Outros"),
@@ -273,7 +239,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         forma_pagamento = expandir_dimensao(
             dim_existente=forma_pagamento,
             df_novo=df,
-            colunas_naturais=["forma_de_pagamento", "abreviacao_forma_pagamento", "tipo_receita"],
+            colunas_naturais=["forma_de_pagamento","abreviacao_forma_pagamento","tipo_receita"],
             nome_id="id_forma_de_pagamento",
             col_pk_natural="forma_de_pagamento",
         )
@@ -283,7 +249,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         print("  dim_empresa.csv não encontrado — criando do zero.")
         forma_pagamento = criar_dimensao(
             df,
-            colunas=["forma_de_pagamento", "abreviacao_forma_pagamento", "tipo_receita"],
+            colunas=["forma_de_pagamento","abreviacao_forma_pagamento","tipo_receita"],
             nome_id="id_forma_de_pagamento",
         )
         print(f"  dim_empresa criada: {forma_pagamento.shape}")
@@ -314,6 +280,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     )
 
     _dim_centro_custo = output_dir / "dim_centro_custo.csv"
+
     if _dim_centro_custo.exists():
         dim_centro_custo = pd.read_csv(_dim_centro_custo, sep=";")
 
@@ -384,43 +351,38 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df["id_cliente"] = df["cod_cliente"].map(_cliente_map)
     df["id_centro_de_custo"] = df["cod_centro_de_custo"].map(_centro_de_custo_map)
 
-    # ── 10. Montar fato ───────────────────────────────────────────────────────
-    print("\n── 10. fato_consulta_parcela ───────────────────────────────────────")
-    print(df.columns)
+    # ── 8. Montar fato ────────────────────────────────────────────────────────
+    print("\n── 8. fato_contas_a_receber ────────────────────────────────────────")
 
     fato = df[[
         # Surrogate keys
-        "id_empresa",
+         "id_empresa",
         "id_documento",
         "id_forma_de_pagamento",
         "id_cliente",
         "id_centro_de_custo",
         # Chaves naturais
-        "cod_centro_de_custo","titulo", "titulo_pesquisa", "parcela", "nn_parcela",
+        "titulo", "titulo_pesquisa", "parcela", "nn_parcela",
         "nn_documento", "origem", "cod_plano_fin", "plano_fin",
         # Datas
         "data_vencimento", "data_emissao", "data_contabil",
-        "data_base", "data_base_juros", "data_do_recebimento", "data_do_calculo", "data_base_juros",
+        "data_base", "data_base_juros", "data_do_recebimento", "data_do_calculo",
         # Métricas financeiras
         "valor_bruto", "desconto", "valor_imposto_retido", "saldo_em_aberto",
-        "saldo_corrigido_em_aberto", "juros_embutidos", "taxa_juros", "valor_recebido", "juros_recebidos",
-        "multa_recebida",
-        "desconto_recebido", "imposto_retido_recebido", "valor_liquido_recebido", "acrescimo_recebido",
-        "%_apropriacao_financeira",
-
-        # Prazo
-        "dias_atraso_pgto", "dias_emissao_ate_pgto", "faixa_emissao_ate_pgto", "faixa_atraso_pgto",
+        "saldo_corrigido_em_aberto", "juros_embutidos", "taxa_juros", "valor_recebido",
+        "juros_recebidos", "multa_recebida", "desconto_recebido", "imposto_retido_recebido",
+        "valor_liquido_recebido", "acrescimo_recebido", "%_apropriacao_financeira",
         # Flags
-        "flag_fonte_api", "flag_pago_antecipado", "flag_pago_atraso",
-
+        "flag_fonte_api",
         # Atributos de workflow / auditoria
-        "situacao_inadimplencia", "tipo_de_operacao", "conta_corrente", "indexador", "historico_bancario",
-        "bank_movement_id"
+        "situacao_inadimplencia", "tipo_de_operacao",
+        "conta_corrente", "indexador", "historico_bancario", "bank_movement_id",
+        "cod_centro_de_custo", "centro_de_custo",
     ]].copy()
 
     fato["data_carga"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # ── 11. Validação ─────────────────────────────────────────────────────────
+    # ── 9. Validação ──────────────────────────────────────────────────────────
     print("\n── 11. Validação ───────────────────────────────────────────────────")
     checar_integridade(
         fato, "id_empresa",
@@ -451,8 +413,9 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         dim_centro_custo, "id_centro_de_custo",
         "fato → dim_centro_de_custo"
     )
-    # ── 12. Exportação ────────────────────────────────────────────────────────
-    print("\n── 12. Exportação ──────────────────────────────────────────────────")
+
+    # ── 10. Exportação ────────────────────────────────────────────────────────
+    print("\n── 10. Exportação ──────────────────────────────────────────────────")
     salvar_tabela(dim_empresa, "dim_empresa", output_dir)
     salvar_tabela(dim_documento, "dim_documento", output_dir)
     salvar_tabela(forma_pagamento, "dim_forma_pagamento", output_dir)
@@ -460,10 +423,10 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     salvar_tabela(dim_centro_custo, "dim_centro_custo", output_dir)
 
     fato.drop_duplicates(subset=['titulo', 'parcela', 'id_centro_de_custo',
-                          'id_forma_de_pagamento', 'id_empresa', 'id_documento',
-                          'valor_liquido_recebido'], inplace=True)
+                                 'id_forma_de_pagamento', 'id_empresa', 'id_documento',
+                                 'saldo_corrigido_em_aberto'], inplace=True)
 
-    salvar_tabela(fato, "fato_contas_recebidas", output_dir)
+    salvar_tabela(fato, "fato_contas_a_receber", output_dir)
 
     print("\n── Resumo ──────────────────────────────────────────────────────────")
     for nome, tab in {
@@ -472,6 +435,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "dim_forma_pagamento": forma_pagamento,
         "dim_cliente": dim_cliente,
         "dim_centro_custo": dim_centro_custo,
-        "fato_contas_recebidas": fato,
+        "fato_contas_a_receber": fato,
     }.items():
         print(f"  {nome:<35} {str(tab.shape):>12}")

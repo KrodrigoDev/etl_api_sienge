@@ -25,6 +25,10 @@ from stage.transform.contas_recebidas_transformer_2 import executar as executar_
 from stage.extract.titulos_contas_pagas_extractor import TitulosExtractor, TitulosExtractionResult
 from stage.extract.credores_extractor import CredoresExtractor, CredoresExtractionResult
 
+from stage.extract.contas_a_receber_extractor import ContasAReceberExtractor
+from stage.transform.contas_a_receber_transformer import ContasAReceberTransformer
+from stage.transform.contas_a_receber_transformer_2 import executar as executar_a_receber
+
 logger = logging.getLogger(__name__)
 
 pasta_origem = Path(__file__).resolve().parents[0]
@@ -150,6 +154,47 @@ class ContasRecebidasDriver:
         logger.info("=== Pipeline de Contas Recebidas concluído: %d registros ===", len(df))
 
 
+class ContasAReceberDriver:
+    """
+        Driver para o pipeline de Contas a recebber.
+
+        Uso típico:
+            df = ContasRecebidasDriver().run()
+
+        Para customizar componentes (ex: testes):
+            driver = ContasPagasDriver(extractor=mock_extractor)
+            df = driver.run()
+        """
+
+    def __init__(
+            self,
+            extractor: ContasAReceberExtractor | None = None,
+            transformer: ContasAReceberTransformer | None = None,
+    ):
+        self._extractor = extractor or ContasAReceberExtractor()
+        self._transformer = transformer or ContasAReceberTransformer()
+
+    def run(self):
+        logger.info("=== Pipeline de Contas a Receber iniciado ===")
+
+        logger.info("[1/2] Iniciando extração...")
+        result = self._extractor.extract()
+
+        logger.info("[2/3] Iniciando primeira transformação...")
+        df = self._transformer.transform(result)
+
+        if df.empty:
+            logger.error("Pipeline finalizado sem dados.")
+        else:
+            df.to_csv((INPUT_DIR / "contas_a_receber.csv"), sep=";", index=False)
+            logger.info("Contas a receber salvas em: %s", (INPUT_DIR / "contas_a_receber.csv"))
+
+        logger.info("[3/3] Iniciando última transformação...")
+        executar_a_receber()
+
+        logger.info("=== Pipeline de Contas a receber concluído: %d registros ===", len(df))
+
+
 class CredoresDriver:
     """
     Driver para o pipeline de Credores.
@@ -238,9 +283,10 @@ if __name__ == "__main__":
 
     setup_logging()
 
+    # ContasPagasDriver().run()
+    #
     # ContasRecebidasDriver().run()
+    # ContasAReceberDriver().run()
 
-    ContasPagasDriver().run()
-
-    # TitulosDriver().run()
-    # CredoresDriver().run()
+    TitulosDriver().run()
+    CredoresDriver().run()
