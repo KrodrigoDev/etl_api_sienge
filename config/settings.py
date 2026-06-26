@@ -4,6 +4,12 @@ Configurações centralizadas do pipeline Sienge.
 from dataclasses import dataclass, field
 from typing import Tuple
 
+EMPRESAS: Tuple[int, ...] = field(default_factory=lambda: (
+    6, 97, 100, 102, 103, 104, 105, 106, 112, 113, 120, 125, 127, 130, 131,
+    137, 138, 139, 140, 158, 166, 190, 20, 333, 45, 64, 67, 72, 73, 83, 84,
+    90, 92, 94, 167
+))
+
 
 @dataclass(frozen=True)
 class ApiConfig:
@@ -18,15 +24,25 @@ class ApiConfig:
 @dataclass(frozen=True)
 class VendasConfig:
     """
-    Documentação:
+    Documentação: https://api.sienge.com.br/v1/docs/#tag/bulk-data-contratos-de-vendas/get/bulk-data/v1/sales
+    
+    A situação pode ser SOLD ou CANCELED
     """
     situacao: str = "SOLD"
     periodo: Tuple[str, str] = ("2019-01-01", "2030-10-05")
-    empresas: Tuple[int, ...] = field(default_factory=lambda: (
-        6, 97, 100, 102, 103, 104, 105, 106, 112, 113, 120, 125, 127, 130, 131,
-        137, 138, 139, 140, 158, 166, 190, 20, 333, 45, 64, 67, 72, 73, 83, 84,
-        90, 92, 94
-    ))
+    empresas: Tuple[int, ...] = EMPRESAS
+
+@dataclass(frozen=True)
+class EstoqueEmpreedimentoConfig:
+    """
+
+    Documentação: https://api.sienge.com.br/v1/docs/#tag/unidades-de-im%C3%B3veis/patch/v1/units/{unitId}
+    """
+    limit: int = 200
+    offset: int = 0
+    empresas: Tuple[int, ...] = EMPRESAS
+
+
 
 
 @dataclass(frozen=True)

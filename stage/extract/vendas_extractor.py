@@ -38,9 +38,11 @@ class VendasExtractor:
         self,
         requester: ApiRequester | None = None,
         config: VendasConfig = VendasConfig(),
+        situation: str = "SOLD",
     ):
         self._requester = requester or ApiRequester(API_CONFIG)
         self._config = config
+        self._situation = situation
 
     # ------------------------------------------------------------------
     # Interface pública
@@ -98,8 +100,9 @@ class VendasExtractor:
     ) -> List[dict]:
 
         units = venda.get("units", []) or [{}]
-        payments = venda.get("paymentConditions", []) or [{}]
+        # payments = venda.get("paymentConditions", []) or [{}]
         brokers = venda.get("brokers", []) or [{}]
+        clientes = venda.get("customers", []) or [{}]
 
         # Remove listas internas da venda
         venda_base = {
@@ -107,7 +110,8 @@ class VendasExtractor:
             for k, v in venda.items()
             if k not in (
                 "units",
-                "paymentConditions",
+                # "paymentConditions",
+                "customers",
                 "brokers",
             )
         }
@@ -115,15 +119,16 @@ class VendasExtractor:
         registros: List[dict] = []
 
         for unit in units:
-            for payment in payments:
-                for broker in brokers:
+            for broker in brokers:
+                for cliente in clientes:
                     registro = {
                         "empresa_id": empresa_id,
 
                         **self._prefix_dict(venda_base, "sale"),
                         **self._prefix_dict(unit, "units"),
-                        **self._prefix_dict(payment, "paymentConditions"),
+                        # **self._prefix_dict(payment, "paymentConditions"),
                         **self._prefix_dict(broker, "brokers"),
+                        **self._prefix_dict(cliente, "clientes")
                     }
 
                     registros.append(registro)
@@ -174,7 +179,7 @@ class VendasExtractor:
             f"?enterpriseId={empresa_id}"
             f"&createdAfter={cfg.periodo[0]}"
             f"&createdBefore={cfg.periodo[1]}"
-            f"&situation={cfg.situacao}"
+            f"&situation={self._situation}"
         )
 
     @staticmethod

@@ -39,7 +39,7 @@ df_sienge = pd.merge(df_titulo, dim_credor_receita, left_on='credor', right_on='
 
 dia_extracao = datetime.now().strftime("%d.%m.%Y")
 
-files = (INPUT_DIR / 'servico_tomado' / "19.06.2026").rglob('*.csv*')
+files = (INPUT_DIR / 'servico_tomado' / "22.06.2026").rglob('*.csv*')
 
 dfs = []
 for file in files:
@@ -172,16 +172,34 @@ def _preparar_giss(df: pd.DataFrame) -> pd.DataFrame:
 
     df = df[df['situacao'] == 'Ativa'].reset_index(drop=True)
 
+    # Usa cnpj como índice temporariamente
+
+    df = df.set_index('_cnpj_norm', drop=False)
+    df.loc["53821891000103", '_cnpj_norm'] = '43367488000100' # Caso específico onde as notas foram cadastrados no cnpj errado
+
+    df = df.reset_index(drop=True)
+
     return df
 
 
 def _preparar_sienge(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
+
     df['_cnpj_norm'] = _limpar_cnpj(df['cnpj'])
     df['_valor'] = pd.to_numeric(df['valor_bruto'], errors='coerce').pipe(np.floor).astype('Int64')
     df['_data'] = pd.to_datetime(df['emissao_nf'], errors='coerce').dt.normalize()
     df['_num_doc'] = _extrair_numero_doc(df['documento'])
-    df['_idx_sienge'] = df.index  # guarda posição original
+    df['_idx_sienge'] = df.index
+
+    # Usa título como índice temporariamente
+    df = df.set_index('titulo', drop=False)
+    df.loc[475332, '_num_doc'] = '5385'
+    df.loc[475332, 'documento'] = 'NFS /5385'
+    df.loc[475332, 'numero_documento'] = '5385'
+
+    # Volta para índice padrão
+    df = df.reset_index(drop=True)
+
     return df
 
 
@@ -277,26 +295,26 @@ def match_bases(
 
         cross['score'] = _calcular_scores(cross)
 
-        # if cnpj == "10829093000115":
-        #     debug_cols = [
-        #         '_cnpj_norm_g',
-        #         '_cnpj_norm_s',
-        #         '_valor_g',
-        #         '_valor_s',
-        #         '_data_g',
-        #         '_data_s',
-        #         '_num_doc_g',
-        #         '_num_doc_s',
-        #         'score'
-        #     ]
-        #
-        #     print(f"\n========== DEBUG CNPJ {cnpj} ==========")
-        #     print(
-        #         cross[debug_cols]
-        #         .sort_values('score', ascending=False)
-        #         .head(1000)
-        #         .to_string()
-        #     )
+        if cnpj == "11992870000100":
+            debug_cols = [
+                '_cnpj_norm_g',
+                '_cnpj_norm_s',
+                '_valor_g',
+                '_valor_s',
+                '_data_g',
+                '_data_s',
+                '_num_doc_g',
+                '_num_doc_s',
+                'score'
+            ]
+
+            print(f"\n========== DEBUG CNPJ {cnpj} ==========")
+            print(
+                cross[debug_cols]
+                .sort_values('score', ascending=False)
+                .head(1000)
+                .to_string()
+            )
 
         pares.append(cross[cross['score'] >= threshold])
 

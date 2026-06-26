@@ -13,6 +13,13 @@ import pandas as pd
 
 from stage.extract.vendas_extractor import VendasExtractor
 from stage.transform.vendas_transformer import VendasTransformer
+from stage.transform.vendas_transformer_2 import executar as executar_vendas
+
+from stage.extract.estoque_empreedimento_extractor import  EstoqueEmpreedimentosExtractor
+from stage.transform.estoque_empreedimento_transformer import  EstoqueEmpreedimentoTransformer
+from stage.transform.estoque_empreedimento_transformer_2 import  executar as executar_estoque_empreedimento
+
+
 
 from stage.extract.contas_pagas_extractor import ContasPagasExtractor
 from stage.transform.contas_pagas_transformer import ContasPagasTransformer
@@ -22,8 +29,8 @@ from stage.extract.contas_recebidas_extractor import ContasRecebidasExtractor
 from stage.transform.contas_recebidas_transformer import ContasRecebidasTransformer
 from stage.transform.contas_recebidas_transformer_2 import executar as executar_recebidas
 
-from stage.extract.titulos_contas_pagas_extractor import TitulosExtractor, TitulosExtractionResult
-from stage.extract.credores_extractor import CredoresExtractor, CredoresExtractionResult
+from stage.extract.titulos_contas_pagas_extractor import TitulosExtractor
+from stage.extract.credores_extractor import CredoresExtractor
 
 from stage.extract.contas_a_receber_extractor import ContasAReceberExtractor
 from stage.transform.contas_a_receber_transformer import ContasAReceberTransformer
@@ -49,27 +56,79 @@ class VendasDriver:
 
     def __init__(
             self,
+            situation: str,
             extractor: VendasExtractor | None = None,
             transformer: VendasTransformer | None = None,
     ):
-        self._extractor = extractor or VendasExtractor()
+        self._extractor = extractor or VendasExtractor(situation=situation)
         self._transformer = transformer or VendasTransformer()
+        self._situation = situation
 
     def run(self) -> pd.DataFrame:
         logger.info("=== Pipeline de Vendas iniciado ===")
 
-        logger.info("[1/2] Iniciando extração...")
+        logger.info("[1/3] Iniciando extração...")
         results = self._extractor.extract()  # List[VendasExtractionResult]
 
-        logger.info("[2/2] Iniciando transformação...")
+        logger.info("[2/3] Iniciando transformação...")
         df = self._transformer.transform(results)
 
         if df.empty:
             logger.error("Pipeline finalizado sem dados.")
-            return df
+        else:
+            nome_arquivo = "contrato_vendas_vendidas" if self._situation == 'SOLD' else "contrato_vendas_distratos"
+
+            df.to_csv((INPUT_DIR / f"{nome_arquivo}.csv"), sep=";", index=False)
+            logger.info("Contrato de vendas salvas em: %s", (INPUT_DIR / f"{nome_arquivo}.csv"))
+
+        logger.info("[3/3] Iniciando última transformação...")
+        executar_vendas()
 
         logger.info("=== Pipeline de Vendas concluído: %d registros ===", len(df))
-        return df
+
+
+class EstoqueEmpreedimentoDriver:
+    """
+    Driver para o pipeline de Estoque Empreedimento.
+
+    Uso típico:
+        df = EstoqueEmpreedimentoDriver().run()
+
+    Para customizar componentes (ex: testes):
+        driver = EstoqueEmpreedimentoDriver(extractor=mock_extractor)
+        df = driver.run()
+    """
+
+    def __init__(
+            self,
+            extractor: EstoqueEmpreedimentosExtractor | None = None,
+            transformer: EstoqueEmpreedimentoTransformer | None = None,
+    ):
+        self._extractor = extractor or EstoqueEmpreedimentosExtractor()
+        self._transformer = transformer or EstoqueEmpreedimentoTransformer()
+
+    def run(self) -> pd.DataFrame:
+        logger.info("=== Pipeline de Estoque de Empreedimentos iniciado ===")
+
+        logger.info("[1/3] Iniciando extração...")
+        results = self._extractor.extract()
+
+        logger.info("[2/3] Iniciando transformação...")
+        df = self._transformer.transform(results)
+
+        if df.empty:
+            logger.error("Pipeline finalizado sem dados.")
+        else:
+
+            df.to_csv((INPUT_DIR / f"estoqueempreedimento.csv"), sep=";", index=False)
+            logger.info("Estoque de Empreedimentos de vendas salvas em: %s", (INPUT_DIR / f"estoqueempreedimento.csv"))
+
+        logger.info("[3/3] Iniciando última transformação...")
+        executar_estoque_empreedimento()
+
+
+        logger.info("=== Pipeline de Estoque de Empreedimentos concluído: %d registros ===", len(df))
+
 
 
 class ContasPagasDriver:
@@ -285,8 +344,12 @@ if __name__ == "__main__":
 
     # ContasPagasDriver().run()
     #
-    # ContasRecebidasDriver().run()
     # ContasAReceberDriver().run()
+    # ContasRecebidasDriver().run()
 
-    TitulosDriver().run()
-    CredoresDriver().run()
+    EstoqueEmpreedimentoDriver().run()
+
+    # VendasDriver(situation="CANCELED").run()
+    # VendasDriver(situation="SOLD").run()
+    # TitulosDriver().run()
+    # CredoresDriver().run()

@@ -31,12 +31,21 @@ RENAME_COLUMNS_VENDAS = {
     # -------------------------
     "enterpriseId": "id_empresa",
     "empresa_id": "id_empresa_contexto",
+    # -------------------------
+    # CLIENTES
+    # -------------------------
+    "clientes_id":"cod_cliente",
+    "clientes_name":"nome_cliente",
+    "clientes_sex": "sexo_cliente",
+    "clientes_profession": "profissao_cliente",
+    "clientes_birthDate": "aniversario_cliente",
+
 
     # -------------------------
     # SALE
     # -------------------------
     "sale_id": "id_venda",
-    "sale_enterpriseId": "id_empresa_venda",
+    "sale_enterpriseId": "cod_centro_de_custo",
     "sale_receivableBillId": "id_titulo_receber",
     "sale_refundBillId": "id_titulo_estorno",
     "sale_proRataIndexer": "indexador_pro_rata",
@@ -89,18 +98,18 @@ RENAME_COLUMNS_VENDAS = {
     # -------------------------
     # PAYMENT CONDITIONS
     # -------------------------
-    "paymentConditions_conditionTypeId": "id_tipo_condicao_pagamento",
-    "paymentConditions_conditionTypeName": "nome_tipo_condicao_pagamento",
-    "paymentConditions_bearerId": "id_portador",
-    "paymentConditions_bearerName": "nome_portador",
-    "paymentConditions_installmentsNumber": "numero_parcelas",
-    "paymentConditions_totalValue": "valor_total_condicao_pagamento",
-    "paymentConditions_firstPayment": "data_primeiro_pagamento",
+    # "paymentConditions_conditionTypeId": "id_tipo_condicao_pagamento",
+    # "paymentConditions_conditionTypeName": "nome_tipo_condicao_pagamento",
+    # "paymentConditions_bearerId": "id_portador",
+    # "paymentConditions_bearerName": "nome_portador",
+    # "paymentConditions_installmentsNumber": "numero_parcelas",
+    # "paymentConditions_totalValue": "valor_total_condicao_pagamento",
+    # "paymentConditions_firstPayment": "data_primeiro_pagamento",
 
     # -------------------------
     # BROKERS
     # -------------------------
-    "brokers_id": "id_corretor",
+    "brokers_id": "cod_corretor",
     "brokers_name": "nome_corretor",
     "brokers_main": "corretor_principal",
 }
@@ -115,7 +124,10 @@ class VendasTransformer:
             return pd.DataFrame()
 
         df = self._consolidate(sucessos)
+
+        print(df.columns)
         df = self._rename_columns(df)
+
         df = self._cast_dates(df)
         df = self._cast_numerics(df)
         df = self._deduplicate(df)
