@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 
 from config.settings import ApiConfig
 
-load_dotenv()
+load_dotenv(r"D:\GitHub\etl_api_sienge\.env")
 
 logger = logging.getLogger(__name__)
 

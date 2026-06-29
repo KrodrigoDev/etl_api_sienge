@@ -24,6 +24,8 @@ from stage.transform.utils.normalizer import (
     criar_dimensao,
 )
 
+from stage.transform.utils.dim_permutante import gerar_chave_permutante
+
 # ─────────────────────────────────────────────────────────────────────────────
 # CONFIGURAÇÃO
 # ─────────────────────────────────────────────────────────────────────────────
@@ -31,6 +33,7 @@ from stage.transform.utils.normalizer import (
 pasta_origem = Path(__file__).resolve().parents[2]
 INPUT_DIR = pasta_origem / "stage" / "transform" / "files" / "input"
 OUTPUT_DIR = pasta_origem / "stage" / "transform" / "files" / "output"
+REFERENCE_DIR = pasta_origem / "stage" / "transform" / "files" / "reference"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -127,8 +130,42 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df_vendidas = pd.read_csv(input_dir / "contrato_vendas_vendidas.csv", sep=";")
     df_distratos = pd.read_csv(input_dir / "contrato_vendas_distratos.csv", sep=";")
 
+    df_auxiliar_centro = pd.read_csv((REFERENCE_DIR / 'auxiliar_gabriel.csv'), sep=';')
+
+    df_auxiliar_centro = normalizar_colunas(df_auxiliar_centro)
     df_vendidas = normalizar_colunas(df_vendidas)
     df_distratos = normalizar_colunas(df_distratos)
+
+    # cod_centro_de_custo vem de sale_enterpriseId (id da empresa/empreendimento)
+    # Garantir que as colunas estejam como inteiro
+    df_vendidas['cod_centro_de_custo'] = pd.to_numeric(
+        df_vendidas['cod_centro_de_custo'],
+        errors='coerce'
+    ).astype('Int64')
+
+    df_distratos['cod_centro_de_custo'] = pd.to_numeric(
+        df_distratos['cod_centro_de_custo'],
+        errors='coerce'
+    ).astype('Int64')
+
+    df_auxiliar_centro['cod_centro_de_custo'] = pd.to_numeric(
+        df_auxiliar_centro['cod_centro_de_custo'],
+        errors='coerce'
+    ).astype('Int64')
+
+    print(df_auxiliar_centro.columns)
+
+    df_vendidas = df_vendidas.merge(
+        df_auxiliar_centro,
+        on='cod_centro_de_custo',
+        how='left'
+    )
+
+    df_distratos = df_distratos.merge(
+        df_auxiliar_centro,
+        on='cod_centro_de_custo',
+        how='left'
+    )
 
     # flag de origem para rastreabilidade no BI
     df_vendidas["flag_fonte_api"] = True
@@ -145,8 +182,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         for df in (df_vendidas, df_distratos):
             if col in df.columns:
                 df[col] = _parse_date(df[col])
-
-
 
     # ── 3. Campos auxiliares ──────────────────────────────────────────────────
     print("\n── 3. Campos auxiliares ────────────────────────────────────────────")
@@ -165,9 +200,30 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
     df_tudo['valor_venda'] = pd.to_numeric(df_tudo['valor_venda'], errors='coerce')
 
     # ── 5. dim_centro_custo ───────────────────────────────────────────────────
-    # cod_centro_de_custo vem de sale_enterpriseId (id da empresa/empreendimento)
-    print("\n── 5. dim_centro_custo ─────────────────────────────────────────────")
-    dim_centro_custo = pd.read_csv((OUTPUT_DIR / "dim_centro_custo.csv"), sep=';')
+
+    _dim_centro_custo_path = output_dir / "dim_centro_custo.csv"
+
+    if _dim_centro_custo_path.exists():
+        dim_centro_custo = pd.read_csv(_dim_centro_custo_path, sep=";")
+        dim_centro_custo = expandir_dimensao(
+            dim_existente=dim_centro_custo,
+            df_novo=df_tudo,
+            colunas_naturais=["cod_centro_de_custo", "centro_de_custo_1", "centro_de_custo_2", "tipo_de_obra_2",
+                              "tipo_de_obra_2", 'classificacao_1', 'classificacao_2'],
+            nome_id="id_centro_de_custo",
+            col_pk_natural="cod_centro_de_custo",
+        )
+        print(f"  dim_empresa carregada e expandida: {dim_centro_custo.shape}")
+    else:
+        print("  dim_empresa.csv não encontrado — criando do zero.")
+
+        dim_centro_custo = criar_dimensao(
+            df_tudo,
+            colunas=["cod_centro_de_custo", "centro_de_custo_1", "centro_de_custo_2", "tipo_de_obra_2",
+                     "tipo_de_obra_2", 'classificacao_1', 'classificacao_2'],
+            nome_id="id_centro_de_custo",
+        )
+        print(f"  dim_centro_custo criada: {dim_centro_custo.shape}")
 
     for df in (df_vendidas, df_distratos):
         df = _mapear_surrogate(df, "cod_centro_de_custo", dim_centro_custo,
@@ -215,7 +271,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         col_pk_natural="cod_corretor",
     )
 
-
     for df in (df_vendidas, df_distratos):
         df = _mapear_surrogate(df, "cod_corretor", dim_corretor,
                                "cod_corretor", "id_corretor")
@@ -249,7 +304,6 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         df = _mapear_surrogate(df, "id_titulo_receber", dim_titulo,
                                "id_titulo_receber", "id_titulo")
 
-
     # ── 9. Montagem da fato ───────────────────────────────────────────────────
     print("\n── 9. fato_vendas ──────────────────────────────────────────────────")
 
@@ -261,6 +315,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         "id_corretor",  # ← dim_corretor  (já é natural/surrogate)
         "id_titulo",  # ← dim_titulo_recebimento
         "chave_composta_unidade",
+        "cod_centro_de_custo",
         # ── Chaves naturais de apoio ─────────────────────────────────────────
         "id_venda",  # sale_id
         "id_unidade_detalhe",  # units_id
@@ -307,10 +362,7 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
         fato["data_carga"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         return fato
 
-
-
     # ── Fato Vendas ──────────────────────────────────────────────────────────────
-
 
     fato_vendas = _montar_fato(df_vendidas)
     fato_vendas = fato_vendas[
@@ -422,6 +474,41 @@ def executar(input_dir: Path = INPUT_DIR, output_dir: Path = OUTPUT_DIR) -> None
             .str.replace(r"\s+", "_", regex=True)
             .str.lower()
     )
+
+    fato_vendas["chave_permutante"] = fato_vendas.apply(
+        lambda r: gerar_chave_permutante(r["cod_centro_de_custo"], r["nome_unidade"]),
+        axis=1,
+    )
+
+    # ── Enriquecimento com dim_permutante ─────────────────────────────────────
+    dim_permutante = pd.read_csv(OUTPUT_DIR / "dim_permutante.csv", sep=";", dtype=str)
+
+    centros_permutante = set(dim_permutante["cod_centro_de_custo"].dropna().unique())
+
+    fato_vendas["cod_centro_de_custo"] = fato_vendas["cod_centro_de_custo"].astype(str)
+
+    mask = fato_vendas["cod_centro_de_custo"].isin(centros_permutante)
+
+    tem_permutante = fato_vendas[mask].copy()
+    sem_permutante = fato_vendas[~mask].copy()
+
+    tem_permutante = tem_permutante.merge(
+            dim_permutante[["chave_permutante", "nome_permutante"]],
+            on="chave_permutante",
+            how="left",
+        )
+
+    sem_permutante["nome_permutante"] = pd.NA
+
+    resultado = pd.concat([tem_permutante, sem_permutante], ignore_index=True)
+
+    fato_vendas.drop(columns=fato_vendas.columns.tolist(), inplace=True)
+    fato_vendas[resultado.columns] = resultado.values
+
+    df_estoque_unidade = pd.read_csv(OUTPUT_DIR / "fato_estoque_unidades.csv", sep=';')
+    df_estoque_unidade = df_estoque_unidade[['chave_composta_unidade', 'status_cv']]
+
+    fato_vendas = fato_vendas.merge(df_estoque_unidade, on='chave_composta_unidade', how='left')
 
     salvar_tabela(fato_vendas, "fato_vendas", output_dir)
     salvar_tabela(fato_distratos, "fato_distratos", output_dir)

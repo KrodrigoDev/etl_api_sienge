@@ -15,11 +15,9 @@ from stage.extract.vendas_extractor import VendasExtractor
 from stage.transform.vendas_transformer import VendasTransformer
 from stage.transform.vendas_transformer_2 import executar as executar_vendas
 
-from stage.extract.estoque_empreedimento_extractor import  EstoqueEmpreedimentosExtractor
-from stage.transform.estoque_empreedimento_transformer import  EstoqueEmpreedimentoTransformer
-from stage.transform.estoque_empreedimento_transformer_2 import  executar as executar_estoque_empreedimento
-
-
+from stage.extract.estoque_empreedimento_extractor import EstoqueEmpreedimentosExtractor
+from stage.transform.estoque_empreedimento_transformer import EstoqueEmpreedimentoTransformer
+from stage.transform.estoque_empreedimento_transformer_2 import executar as executar_estoque_empreedimento
 
 from stage.extract.contas_pagas_extractor import ContasPagasExtractor
 from stage.transform.contas_pagas_transformer import ContasPagasTransformer
@@ -35,6 +33,10 @@ from stage.extract.credores_extractor import CredoresExtractor
 from stage.extract.contas_a_receber_extractor import ContasAReceberExtractor
 from stage.transform.contas_a_receber_transformer import ContasAReceberTransformer
 from stage.transform.contas_a_receber_transformer_2 import executar as executar_a_receber
+
+from stage.extract.historico_cliente_extractor import ExtratoClienteHistoricoExtractor
+from stage.transform.historico_cliente_transformer import ExtratoClienteHistoricoTransformer
+from config.settings import ExtratoClienteHistoricoConfig
 
 logger = logging.getLogger(__name__)
 
@@ -57,12 +59,14 @@ class VendasDriver:
     def __init__(
             self,
             situation: str,
+            rodar_etapa_final: bool = False,
             extractor: VendasExtractor | None = None,
             transformer: VendasTransformer | None = None,
     ):
         self._extractor = extractor or VendasExtractor(situation=situation)
         self._transformer = transformer or VendasTransformer()
         self._situation = situation
+        self._rodar_etapa_final = rodar_etapa_final
 
     def run(self) -> pd.DataFrame:
         logger.info("=== Pipeline de Vendas iniciado ===")
@@ -81,8 +85,9 @@ class VendasDriver:
             df.to_csv((INPUT_DIR / f"{nome_arquivo}.csv"), sep=";", index=False)
             logger.info("Contrato de vendas salvas em: %s", (INPUT_DIR / f"{nome_arquivo}.csv"))
 
-        logger.info("[3/3] Iniciando última transformação...")
-        executar_vendas()
+        if self._rodar_etapa_final:
+            logger.info("[3/3] Iniciando última transformação...")
+            executar_vendas()
 
         logger.info("=== Pipeline de Vendas concluído: %d registros ===", len(df))
 
@@ -119,16 +124,13 @@ class EstoqueEmpreedimentoDriver:
         if df.empty:
             logger.error("Pipeline finalizado sem dados.")
         else:
-
             df.to_csv((INPUT_DIR / f"estoqueempreedimento.csv"), sep=";", index=False)
             logger.info("Estoque de Empreedimentos de vendas salvas em: %s", (INPUT_DIR / f"estoqueempreedimento.csv"))
 
         logger.info("[3/3] Iniciando última transformação...")
         executar_estoque_empreedimento()
 
-
         logger.info("=== Pipeline de Estoque de Empreedimentos concluído: %d registros ===", len(df))
-
 
 
 class ContasPagasDriver:
@@ -174,15 +176,15 @@ class ContasPagasDriver:
 
 class ContasRecebidasDriver:
     """
-        Driver para o pipeline de Contas recebidas.
+    Driver para o pipeline de Contas Recebidas.
 
-        Uso típico:
-            df = ContasRecebidasDriver().run()
+    Uso típico:
+        df = ContasRecebidasDriver().run()
 
-        Para customizar componentes (ex: testes):
-            driver = ContasPagasDriver(extractor=mock_extractor)
-            df = driver.run()
-        """
+    Para customizar componentes (ex: testes):
+        driver = ContasPagasDriver(extractor=mock_extractor)
+        df = driver.run()
+    """
 
     def __init__(
             self,
@@ -215,15 +217,15 @@ class ContasRecebidasDriver:
 
 class ContasAReceberDriver:
     """
-        Driver para o pipeline de Contas a recebber.
+    Driver para o pipeline de Contas a Receber.
 
-        Uso típico:
-            df = ContasRecebidasDriver().run()
+    Uso típico:
+        df = ContasRecebidasDriver().run()
 
-        Para customizar componentes (ex: testes):
-            driver = ContasPagasDriver(extractor=mock_extractor)
-            df = driver.run()
-        """
+    Para customizar componentes (ex: testes):
+        driver = ContasPagasDriver(extractor=mock_extractor)
+        df = driver.run()
+    """
 
     def __init__(
             self,
@@ -337,6 +339,75 @@ class TitulosDriver:
         return df
 
 
+class ExtratoClienteHistoricoDriver:
+    """
+    Driver para o pipeline de Extrato Cliente Histórico (série histórica mensal).
+
+    Itera mês a mês de competencia_inicio até competencia_fim.
+    Para cada mês M: positionDate = correctionDate = 1º dia de M+1 (lógica VDQT).
+    startDueDate/endDueDate são fixos — cobrem toda a carteira.
+    Cada registro recebe a coluna `posicao` no formato "YYYY-MM".
+
+    Ajuste o intervalo diretamente nas duas variáveis abaixo:
+
+    ┌──────────────────────┬──────────────────────────────────────────┐
+    │  COMPETENCIA_INICIO  │  Primeiro mês de competência (inclusive) │
+    │  COMPETENCIA_FIM     │  Último mês de competência  (inclusive)  │
+    └──────────────────────┴──────────────────────────────────────────┘
+
+    Uso típico:
+        ExtratoClienteHistoricoDriver().run()
+
+    Para intervalo customizado sem alterar as variáveis da classe:
+        ExtratoClienteHistoricoDriver(
+            competencia_inicio="2024-01",
+            competencia_fim="2024-12",
+        ).run()
+    """
+
+
+    def __init__(
+            self,
+            extractor: ExtratoClienteHistoricoExtractor | None = None,
+            transformer: ExtratoClienteHistoricoTransformer | None = None,
+    ):
+
+        self._extractor = extractor or ExtratoClienteHistoricoExtractor()
+        self._transformer = transformer or ExtratoClienteHistoricoTransformer()
+
+    def run(self) -> pd.DataFrame:
+        logger.info("=== Pipeline de Extrato Cliente Histórico iniciado ===")
+
+        logger.info("[1/2] Iniciando extração da série histórica...")
+        result = self._extractor.extract()
+
+        if not result.sucesso and result.meses_processados == 0:
+            logger.error("Extração falhou em todos os meses.")
+            return pd.DataFrame()
+
+        logger.info("[2/2] Iniciando transformação...")
+        df = self._transformer.transform(result)
+
+        if df.empty:
+            logger.error("Pipeline finalizado sem dados.")
+            return df
+
+        df.to_csv((INPUT_DIR / "extrato_cliente_historico.csv"), sep=";", index=False)
+        logger.info(
+            "Extrato Cliente Histórico salvo em: %s",
+            (INPUT_DIR / "extrato_cliente_historico.csv"),
+        )
+
+        logger.info(
+            "=== Pipeline de Extrato Cliente Histórico concluído: %d registros | "
+            "%d meses OK | %d meses com erro ===",
+            len(df),
+            result.meses_processados,
+            result.meses_com_erro,
+        )
+        return df
+
+
 if __name__ == "__main__":
     from utils.logging_config import setup_logging
 
@@ -347,9 +418,15 @@ if __name__ == "__main__":
     # ContasAReceberDriver().run()
     # ContasRecebidasDriver().run()
 
-    EstoqueEmpreedimentoDriver().run()
+    # adicionar aqui a extração abaixo
+    # estoque_disponivel_cv_extractor.py
 
     # VendasDriver(situation="CANCELED").run()
-    # VendasDriver(situation="SOLD").run()
+    # VendasDriver(situation="SOLD", rodar_etapa_final=True).run()
+    #
+    # EstoqueEmpreedimentoDriver().run()
+
+    ExtratoClienteHistoricoDriver().run()
+
     # TitulosDriver().run()
-    # CredoresDriver().run()
+    # CredoresDriver().3run()

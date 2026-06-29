@@ -2,14 +2,71 @@
 Configurações centralizadas do pipeline Sienge.
 """
 from dataclasses import dataclass, field
-from typing import Tuple
+from typing import Tuple, Optional
 
 EMPRESAS: Tuple[int, ...] = field(default_factory=lambda: (
     6, 97, 100, 102, 103, 104, 105, 106, 112, 113, 120, 125, 127, 130, 131,
     137, 138, 139, 140, 158, 166, 190, 20, 333, 45, 64, 67, 72, 73, 83, 84,
-    90, 92, 94, 167
+    90, 92, 94, 167, 204
 ))
 
+
+@dataclass(frozen=True)
+class ExtratoClienteHistoricoConfig:
+    """
+    Configuração para extração da série histórica mensal do extrato de cliente.
+
+    Documentação:
+      https://api.sienge.com.br/v1/docs/#tag/bulk-data-extrato-cliente-hist%C3%B3rico/get/bulk-data/v1/customer-extract-history
+
+    ┌─────────────────────────────────────────────────────────────────┐
+    │  VARIÁVEIS PRINCIPAIS — ajuste aqui para controlar a série      │
+    ├──────────────────────┬──────────────────────────────────────────┤
+    │  competencia_inicio  │  Primeiro mês de competência (inclusive) │
+    │  competencia_fim     │  Último mês de competência  (inclusive)  │
+    └──────────────────────┴──────────────────────────────────────────┘
+
+    Formato: "YYYY-MM"
+    Exemplos:
+      competencia_inicio = "2023-01"   # janeiro de 2023
+      competencia_fim    = "2025-05"   # maio de 2025  → 29 requisições
+
+    Lógica interna (automática, não precisa alterar):
+      Para cada mês M em [inicio, fim]:
+        positionDate = 1º dia de M+1
+        → jan/2023 usa positionDate = "2023-02-01"
+        → mai/2025 usa positionDate = "2025-06-01"
+
+    documentsId = "CT" é fixado diretamente na URL pelo extrator
+    (somente contratos, conforme requisito negocial).
+    """
+
+    # ------------------------------------------------------------------ #
+    #  VARIÁVEIS PRINCIPAIS                                                #
+    # ------------------------------------------------------------------ #
+
+    competencia_inicio: str = "2026-01"   # <- altere aqui
+    competencia_fim: str = "2026-05"      # <- altere aqui
+
+    # ------------------------------------------------------------------ #
+    #  Janela de vencimento das parcelas (normalmente não precisa mudar)   #
+    # ------------------------------------------------------------------ #
+    start_due_date: str = "2001-01-01"
+    end_due_date: str = "2050-12-31"
+
+    # Data de correção do indexador (None = data atual da API)
+    correction_date: Optional[str] = None
+
+    # Filtros opcionais
+    company_id: Optional[int] = None
+    customer_id: Optional[int] = None
+    cost_center_id: Optional[int] = None
+
+    # Flags de inclusão
+    include_remade_installments: bool = True        # parcelas reparceladas
+    include_canceled_installments: bool = True      # parcelas canceladas
+    include_revoked_installments: bool = True       # parcelas distratadas
+    include_renegotiated_discharge: bool = True     # baixas por repactuação
 
 @dataclass(frozen=True)
 class ApiConfig:
@@ -29,7 +86,7 @@ class VendasConfig:
     A situação pode ser SOLD ou CANCELED
     """
     situacao: str = "SOLD"
-    periodo: Tuple[str, str] = ("2019-01-01", "2030-10-05")
+    periodo: Tuple[str, str] = ("2001-01-01", "2030-10-05")
     empresas: Tuple[int, ...] = EMPRESAS
 
 @dataclass(frozen=True)

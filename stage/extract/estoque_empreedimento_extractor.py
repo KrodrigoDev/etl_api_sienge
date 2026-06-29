@@ -93,39 +93,69 @@ class EstoqueEmpreedimentosExtractor:
 
 
     def _extract_empresa(self, empresa_id: int) -> EstoqueExtractionResult:
-        url = self._build_url(empresa_id)
+        """
+        Itera páginas até receber uma página vazia ou com menos registros
+        que o limit, garantindo que nenhum dado seja perdido.
+        """
+        todos_registros: List[dict] = []
+        offset = self._config.offset
+        pagina = 1
+
         try:
-            data = self._requester.get(url)
+            while True:
+                url = self._build_url(empresa_id, offset)
+                logger.debug(
+                    "    Empresa %d — página %d (offset=%d)...",
+                    empresa_id, pagina, offset,
+                )
+                data = self._requester.get(url)
+                pagina_registros: List[dict] = (
+                    data if isinstance(data, list) else data.get("results", [])
+                )
 
-            registros = data if isinstance(data, list) else data.get("results", [])
+                todos_registros.extend(pagina_registros)
 
+                logger.debug(
+                    "    → %d registros nesta página (total acumulado: %d)",
+                    len(pagina_registros), len(todos_registros),
+                )
+
+                # Condição de parada: página retornou menos que o limit → última página
+                if len(pagina_registros) < self._config.limit:
+                    break
+
+                offset += self._config.limit
+                pagina += 1
+
+                # Rate limiting entre páginas da mesma empresa
+                self._requester.rate_limit_sleep()
 
             return EstoqueExtractionResult(
                 empresa_id=empresa_id,
-                registros=registros,
+                registros=todos_registros,
                 sucesso=True,
             )
         except requests.HTTPError as exc:
             return EstoqueExtractionResult(
                 empresa_id=empresa_id,
-                registros=[],
+                registros=todos_registros,  # preserva o que já foi coletado
                 sucesso=False,
                 erro=f"HTTPError: {exc.response.status_code if exc.response else exc}",
             )
         except Exception as exc:  # noqa: BLE001
             return EstoqueExtractionResult(
                 empresa_id=empresa_id,
-                registros=[],
+                registros=todos_registros,  # preserva o que já foi coletado
                 sucesso=False,
                 erro=str(exc),
             )
 
-    def _build_url(self, empresa_id: int) -> str:
+    def _build_url(self, empresa_id: int, offset: int) -> str:
         cfg = self._config
         return (
             f"{API_CONFIG.base_url}v1/units"
             f"?limit={cfg.limit}"
-            f"&offset={cfg.offset}"
+            f"&offset={offset}"
             f"&enterpriseId={empresa_id}"
         )
 

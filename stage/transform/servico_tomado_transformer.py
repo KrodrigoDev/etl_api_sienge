@@ -39,7 +39,7 @@ df_sienge = pd.merge(df_titulo, dim_credor_receita, left_on='credor', right_on='
 
 dia_extracao = datetime.now().strftime("%d.%m.%Y")
 
-files = (INPUT_DIR / 'servico_tomado' / "22.06.2026").rglob('*.csv*')
+files = (INPUT_DIR / 'servico_tomado' / "29.06.2026").rglob('*.csv*')
 
 dfs = []
 for file in files:
@@ -450,7 +450,7 @@ df_only_giss['data_carga'] = hoje
 caminho_fato = OUTPUT_DIR / 'fato_servico_tomado_giss.csv'
 
 if caminho_fato.exists():
-    df_historico = pd.read_csv(caminho_fato, sep=';')
+    df_historico = pd.read_csv(caminho_fato, sep=';', encoding='latin1')
     df_historico = df_historico[df_historico['data_carga'] != hoje]
     df_only_giss = pd.concat([df_historico, df_only_giss], ignore_index=True)
     print(f"  Histórico preservado: {df_historico['data_carga'].nunique()} data(s) anterior(es)")
